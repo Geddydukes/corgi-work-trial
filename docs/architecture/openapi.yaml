@@ -1,0 +1,717 @@
+openapi: 3.0.3
+info:
+  title: Security Deposit Claims Decision Engine API
+  version: 1.0.0
+  description: |
+    Production-ready API for security deposit claims decision processing.
+    Supports synchronous decisions, asynchronous batch processing, and document management.
+  contact:
+    name: API Support
+    email: api-support@example.com
+  license:
+    name: Proprietary
+    url: https://example.com/license
+
+servers:
+  - url: https://api.example.com/v1
+    description: Production server
+  - url: https://staging-api.example.com/v1
+    description: Staging server
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+tags:
+  - name: Claims
+    description: Claim decision operations
+  - name: Documents
+    description: Document management
+  - name: Batch
+    description: Batch processing operations
+  - name: Health
+    description: Health check endpoints
+
+paths:
+  /claims/{tracking_number}/decision:
+    post:
+      tags:
+        - Claims
+      summary: Generate decision for a claim
+      description: |
+        Synchronously generates a decision for a claim. Response time target: < 5 seconds.
+        Supports idempotency via X-Idempotency-Key header.
+      operationId: createDecision
+      parameters:
+        - name: tracking_number
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z0-9-]+$'
+          description: Claim tracking number
+          example: "CLM-2024-001234"
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Request ID for tracing
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Idempotency key to prevent duplicate processing
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+            examples:
+              default:
+                value:
+                  override_max_benefit: 5000.00
+              no_override:
+                value: {}
+      responses:
+        '200':
+          description: Decision generated successfully
+          headers:
+            X-Request-ID:
+              schema:
+                type: string
+                format: uuid
+              description: Request ID for tracing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "VALIDATION_ERROR"
+                  message: "Invalid tracking number format"
+                  details:
+                    field: "tracking_number"
+                    reason: "Must match pattern ^[A-Z0-9-]+$"
+        '401':
+          description: Unauthorized - Invalid or missing authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "CLAIM_NOT_FOUND"
+                  message: "Claim with tracking number CLM-2024-001234 not found"
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                description: Seconds to wait before retrying
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "RATE_LIMIT_EXCEEDED"
+                  message: "Rate limit of 1000 requests per minute exceeded"
+                  retry_after: 60
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "SERVICE_UNAVAILABLE"
+                  message: "Decision service is temporarily unavailable"
+                  retry_after: 30
+
+  /claims/{tracking_number}/documents:
+    get:
+      tags:
+        - Documents
+      summary: Get documents for a claim
+      description: Returns metadata for all documents associated with a claim
+      operationId: getClaimDocuments
+      parameters:
+        - name: tracking_number
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Claim tracking number
+        - name: document_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DocumentType'
+          description: Filter by document type
+      responses:
+        '200':
+          description: Documents retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocumentMetadata'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /batch/evaluate:
+    post:
+      tags:
+        - Batch
+      summary: Submit batch evaluation job
+      description: |
+        Submits a batch of claims for asynchronous evaluation.
+        Returns immediately with batch ID. Completion notification sent via webhook.
+      operationId: submitBatchEvaluation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchEvaluationRequest'
+      responses:
+        '202':
+          description: Batch job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchEvaluationResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /batch/{batch_id}/status:
+    get:
+      tags:
+        - Batch
+      summary: Get batch job status
+      description: Returns current status of a batch evaluation job
+      operationId: getBatchStatus
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Batch job ID
+      responses:
+        '200':
+          description: Batch status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchStatusResponse'
+        '404':
+          description: Batch job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns service health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Returns service readiness status (dependencies available)
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 JWT token
+
+  schemas:
+    DecisionRequest:
+      type: object
+      properties:
+        override_max_benefit:
+          type: number
+          format: decimal
+          minimum: 0
+          maximum: 999999.99
+          description: Override maximum benefit amount (optional)
+          example: 5000.00
+      additionalProperties: false
+
+    DecisionResponse:
+      type: object
+      required:
+        - decision_id
+        - claim_id
+        - tracking_number
+        - proposed_status
+        - proposed_benefit_amount
+        - eligible_total
+        - invoice_total
+        - confidence_score
+        - engine_version
+        - decided_at
+      properties:
+        decision_id:
+          type: integer
+          format: int64
+          description: Unique decision identifier
+          example: 12345
+        claim_id:
+          type: integer
+          format: int64
+          description: Claim identifier
+          example: 67890
+        tracking_number:
+          type: string
+          description: Claim tracking number
+          example: "CLM-2024-001234"
+        decision_type:
+          type: string
+          enum: [automated, manual_override, appeal, reprocessed]
+          description: Type of decision
+          example: "automated"
+        proposed_status:
+          type: string
+          enum: [approve, deny]
+          description: Decision outcome
+          example: "approve"
+        proposed_benefit_amount:
+          type: number
+          format: decimal
+          minimum: 0
+          description: Proposed payment amount
+          example: 2500.00
+        eligible_total:
+          type: number
+          format: decimal
+          minimum: 0
+          description: Total eligible amount before cap
+          example: 3000.00
+        invoice_total:
+          type: number
+          format: decimal
+          minimum: 0
+          description: Total invoice amount
+          example: 3500.00
+        cap_amount:
+          type: number
+          format: decimal
+          nullable: true
+          description: Maximum benefit cap applied
+          example: 5000.00
+        approved_line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+          description: Approved line items
+        ineligible_line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineItem'
+          description: Ineligible line items
+        flags:
+          $ref: '#/components/schemas/Flags'
+        missing_data:
+          $ref: '#/components/schemas/MissingData'
+        reasoning:
+          type: object
+          description: Decision reasoning details
+          additionalProperties: true
+        confidence_score:
+          type: number
+          format: decimal
+          minimum: 0
+          maximum: 100
+          description: Confidence score (0-100)
+          example: 85.5
+        engine_version:
+          type: string
+          description: Decision engine version
+          example: "v2.1.0"
+        processing_time_ms:
+          type: integer
+          description: Processing time in milliseconds
+          example: 1250
+        decided_at:
+          type: string
+          format: date-time
+          description: Decision timestamp
+          example: "2024-01-15T10:30:00Z"
+
+    LineItem:
+      type: object
+      required:
+        - description
+        - amount
+      properties:
+        description:
+          type: string
+          description: Line item description
+          example: "Carpet replacement - living room"
+        amount:
+          type: number
+          format: decimal
+          minimum: 0
+          description: Line item amount
+          example: 1200.00
+        reason:
+          type: string
+          description: Eligibility reason
+          example: "Tenant-caused damage beyond normal wear"
+
+    Flags:
+      type: object
+      properties:
+        critical:
+          type: array
+          items:
+            type: string
+          description: Critical flags requiring attention
+          example: []
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Warning flags
+          example: ["Missing lease start date"]
+        info:
+          type: array
+          items:
+            type: string
+          description: Informational flags
+          example: ["High confidence score"]
+
+    MissingData:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            type: string
+          description: Missing required fields
+          example: ["lease_start_date"]
+        needs_user_input:
+          type: boolean
+          description: Whether user input is required
+          example: true
+
+    DocumentMetadata:
+      type: object
+      required:
+        - document_id
+        - claim_id
+        - original_filename
+        - document_type
+        - file_size_bytes
+        - created_at
+      properties:
+        document_id:
+          type: integer
+          format: int64
+          example: 1001
+        claim_id:
+          type: integer
+          format: int64
+          example: 67890
+        file_path:
+          type: string
+          description: S3 key or file path
+          example: "claims/CLM-2024-001234/invoice.pdf"
+        original_filename:
+          type: string
+          example: "invoice.pdf"
+        file_hash:
+          type: string
+          description: SHA-256 hash
+          example: "a1b2c3d4e5f6..."
+        file_size_bytes:
+          type: integer
+          format: int64
+          example: 245760
+        mime_type:
+          type: string
+          example: "application/pdf"
+        document_type:
+          $ref: '#/components/schemas/DocumentType'
+        classification_confidence:
+          type: number
+          format: decimal
+          minimum: 0
+          maximum: 100
+          example: 95.5
+        page_count:
+          type: integer
+          example: 3
+        processing_status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          example: "completed"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T09:00:00Z"
+
+    DocumentType:
+      type: string
+      enum: [lease, invoice, addendum, unknown, supporting_doc]
+      example: "invoice"
+
+    BatchEvaluationRequest:
+      type: object
+      required:
+        - claim_ids
+      properties:
+        claim_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          minItems: 1
+          maxItems: 1000
+          description: List of claim IDs to evaluate
+          example: [67890, 67891, 67892]
+        webhook_url:
+          type: string
+          format: uri
+          description: Webhook URL for completion notification
+          example: "https://example.com/webhooks/batch-complete"
+        priority:
+          type: integer
+          default: 0
+          description: Processing priority (higher = more urgent)
+          example: 5
+
+    BatchEvaluationResponse:
+      type: object
+      required:
+        - batch_id
+        - estimated_completion
+        - claim_count
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: Batch job identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        estimated_completion:
+          type: string
+          format: date-time
+          description: Estimated completion time
+          example: "2024-01-15T11:00:00Z"
+        claim_count:
+          type: integer
+          description: Number of claims in batch
+          example: 100
+        status:
+          type: string
+          enum: [pending, processing]
+          example: "pending"
+
+    BatchStatusResponse:
+      type: object
+      required:
+        - batch_id
+        - status
+        - claim_count
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, cancelled]
+        claim_count:
+          type: integer
+        processed_count:
+          type: integer
+          description: Number of claims processed
+        successful_count:
+          type: integer
+          description: Number of successful decisions
+        failed_count:
+          type: integer
+          description: Number of failed decisions
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Error code
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              description: Error message
+              example: "Invalid request parameters"
+            details:
+              type: object
+              description: Additional error details
+            retry_after:
+              type: integer
+              description: Seconds to wait before retrying
+            trace_id:
+              type: string
+              format: uuid
+              description: Request trace ID for debugging
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          description: Service version
+        checks:
+          type: object
+          description: Dependency health checks
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, unhealthy]
+              response_time_ms:
+                type: integer
+
+  responses:
+    Unauthorized:
+      description: Unauthorized - Invalid or missing authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "UNAUTHORIZED"
+              message: "Invalid or missing authentication token"
+
+    Forbidden:
+      description: Forbidden - Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "Insufficient permissions for this operation"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+security:
+  - BearerAuth: []
+
