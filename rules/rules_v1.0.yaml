@@ -1,0 +1,299 @@
+version: "1.0"
+effective_date: "2024-01-01"
+approval_bias: true
+
+categories:
+  
+  - name: ELIGIBLE_CLEANING
+    confidence: 90
+    patterns:
+      - '\b(clean|shampoo|sanitiz|maid|janitorial)\b'
+      - '\b(carpet clean|deep clean|move.?out clean)\b'
+      - '\b(professional clean|steam clean|extraction)\b'
+    keywords:
+      positive: [clean, cleaning, shampoo, sanitize, maid, spotless, deep, professional, extraction, steam]
+      negative: [routine, scheduled, normal, regular]
+    examples:
+      - "Professional carpet cleaning"
+      - "Move-out deep cleaning service"
+      - "Steam cleaning of carpets"
+      - "Professional maid service"
+    notes: "Excludes routine scheduled cleaning"
+
+  - name: ELIGIBLE_DAMAGE
+    confidence: 85
+    patterns:
+      - '\b(damage|broken|crack|hole|dent|scratch|chip|shatter)\b'
+      - '\b(repair|fix|replace)\b.{0,20}\b(damage|broken)\b'
+      - '\b(broken window|broken door|broken appliance)\b'
+      - '\b(hole in|holes in|puncture|tear)\b'
+    keywords:
+      positive: [damage, broken, crack, hole, repair, replace, fix, dent, scratch, chip, shatter, puncture, tear]
+      negative: [normal, wear, tear, aging, pre-existing]
+    amount_threshold:
+      above: 50
+      confidence_boost: 10
+    examples:
+      - "Broken window pane replacement"
+      - "Repair holes in drywall"
+      - "Fix broken door handle"
+      - "Replace damaged countertop"
+    notes: "Must be beyond normal wear and tear"
+
+  - name: ELIGIBLE_UNPAID_RENT
+    confidence: 100
+    patterns:
+      - '\b(unpaid rent|rent.{0,15}(balanc|outstand|ow))\b'
+      - '\b(rent arrear|back rent|past due rent)\b'
+      - '\b(rent.{0,10}unpaid|outstanding rent)\b'
+    keywords:
+      positive: [unpaid, rent, balance, outstanding, arrears, past, due, back]
+      negative: []
+    examples:
+      - "Unpaid rent - October 2024"
+      - "Outstanding rent balance"
+      - "Rent arrears"
+      - "Past due rent"
+    notes: "Clearly eligible per contract terms"
+
+  - name: ELIGIBLE_UTILITIES_UNPAID
+    confidence: 80
+    patterns:
+      - '\b(electric|water|gas|sewer|utility).{0,20}\b(unpaid|outstand|balanc)\b'
+      - '\b(unpaid|outstand).{0,20}\b(electric|water|gas|sewer|utility)\b'
+    keywords:
+      positive: [unpaid, utility, utilities, electric, water, gas, sewer, outstanding, balance]
+      negative: [regular, monthly, billing]
+    examples:
+      - "Unpaid electric bill"
+      - "Outstanding water utility charges"
+      - "Past due gas bill"
+    notes: "Unpaid utilities are eligible, regular billing is not"
+
+  - name: ELIGIBLE_PET_DAMAGE
+    confidence: 85
+    patterns:
+      - '\b(pet.{0,15}damage|damage.{0,15}pet)\b'
+      - '\b(urine|stain|odor).{0,15}\b(pet|animal|dog|cat)\b'
+      - '\b(pet.{0,10}clean|pet.{0,10}remov)\b'
+    keywords:
+      positive: [pet, animal, urine, stain, odor, damage, scratch, claw]
+      negative: [normal, wear]
+    examples:
+      - "Pet damage to carpet"
+      - "Urine stain removal from pet"
+      - "Pet odor treatment"
+    notes: "Damage caused by pets is eligible"
+
+  - name: ELIGIBLE_SMOKING_DAMAGE
+    confidence: 90
+    patterns:
+      - '\b(smok|nicotine|tar|odor).{0,15}\b(damage|clean|remov|treatment)\b'
+      - '\b(smoking.{0,10}damage|smoke.{0,10}stain)\b'
+    keywords:
+      positive: [smoke, smoking, nicotine, tar, odor, stain, damage]
+      negative: []
+    examples:
+      - "Smoking damage to walls"
+      - "Nicotine stain removal"
+      - "Smoke odor treatment"
+    notes: "Smoking-related damage is eligible"
+
+  - name: ELIGIBLE_PAINTING_DAMAGE
+    confidence: 80
+    patterns:
+      - '\b(paint|repaint).{0,20}\b(damage|hole|mark|stain)\b'
+      - '\b(repaint.{0,10}due|paint.{0,10}repair)\b'
+    keywords:
+      positive: [paint, repaint, damage, hole, mark, stain, repair]
+      negative: [normal, wear, refresh, routine]
+    examples:
+      - "Repaint due to damage"
+      - "Paint repair for holes"
+    notes: "Painting due to damage, not routine refresh"
+
+  - name: ELIGIBLE_APPLIANCE_DAMAGE
+    confidence: 85
+    patterns:
+      - '\b(appliance|refrigerator|stove|oven|dishwasher|washer|dryer).{0,20}\b(broken|damage|repair|replace)\b'
+      - '\b(repair|replace).{0,20}\b(appliance|refrigerator|stove|oven|dishwasher)\b'
+    keywords:
+      positive: [appliance, refrigerator, stove, oven, dishwasher, washer, dryer, broken, damage, repair, replace]
+      negative: [normal, wear, aging, upgrade]
+    examples:
+      - "Broken refrigerator repair"
+      - "Replace damaged stove"
+      - "Appliance damage repair"
+    notes: "Appliance damage beyond normal wear"
+
+  - name: ELIGIBLE_FLOORING_DAMAGE
+    confidence: 85
+    patterns:
+      - '\b(floor|flooring|carpet|hardwood|tile|vinyl).{0,20}\b(damage|repair|replace|stain|burn)\b'
+      - '\b(repair|replace).{0,20}\b(floor|flooring|carpet|hardwood|tile)\b'
+    keywords:
+      positive: [floor, flooring, carpet, hardwood, tile, vinyl, damage, repair, replace, stain, burn, hole]
+      negative: [normal, wear, upgrade, refinish]
+    examples:
+      - "Carpet damage repair"
+      - "Replace damaged hardwood floor"
+      - "Tile repair for damage"
+    notes: "Flooring damage beyond normal wear"
+
+  - name: ELIGIBLE_PLUMBING_DAMAGE
+    confidence: 90
+    patterns:
+      - '\b(plumb|pipe|faucet|toilet|sink|drain|leak).{0,20}\b(broken|damage|repair|replace|clog)\b'
+      - '\b(repair|replace).{0,20}\b(pipe|faucet|toilet|sink|drain)\b'
+    keywords:
+      positive: [plumb, pipe, faucet, toilet, sink, drain, leak, broken, damage, repair, replace, clog]
+      negative: [normal, wear, routine, maintenance]
+    examples:
+      - "Broken pipe repair"
+      - "Replace damaged faucet"
+      - "Toilet damage repair"
+    notes: "Plumbing damage beyond normal maintenance"
+
+  - name: INELIGIBLE_NORMAL_WEAR
+    confidence: 95
+    patterns:
+      - '\b(normal wear|wear and tear|aging|depreciation)\b'
+      - '\b(expected.{0,10}wear|ordinary use|reasonable wear)\b'
+      - '\b(normal.{0,10}wear|standard wear)\b'
+    keywords:
+      positive: [normal, wear, tear, aging, depreciation, expected, ordinary, standard, reasonable]
+      negative: []
+    auto_deny: true
+    examples:
+      - "Normal wear and tear on walls"
+      - "Expected aging of appliances"
+      - "Standard wear on carpet"
+    notes: "Legally non-chargeable in most jurisdictions"
+
+  - name: INELIGIBLE_UPGRADES
+    confidence: 90
+    patterns:
+      - '\b(upgrad|renovat|improv|moderniz|remodel)\b'
+      - '\b(upgrade.{0,20}(kitchen|bathroom|appliance|fixture))\b'
+    keywords:
+      positive: [upgrade, renovation, improvement, modernize, remodel, enhance, betterment]
+      negative: []
+    examples:
+      - "Kitchen upgrade to granite counters"
+      - "Bathroom modernization"
+      - "Appliance upgrade"
+    notes: "Upgrades are landlord expenses"
+
+  - name: INELIGIBLE_ROUTINE_MAINTENANCE
+    confidence: 90
+    patterns:
+      - '\b(routine|scheduled|preventive|preventative|annual|regular).{0,20}\b(maintenance|service|inspection|cleaning)\b'
+      - '\b(maintenance|service).{0,20}\b(routine|scheduled|preventive|regular)\b'
+    keywords:
+      positive: [routine, scheduled, preventive, preventative, annual, regular, maintenance, service, inspection]
+      negative: []
+    examples:
+      - "Routine maintenance service"
+      - "Scheduled annual inspection"
+      - "Preventive maintenance"
+    notes: "Routine maintenance is landlord responsibility"
+
+  - name: INELIGIBLE_PRE_EXISTING
+    confidence: 95
+    patterns:
+      - '\b(pre.?existing|pre.?existing|existing.{0,10}damage|prior damage)\b'
+      - '\b(damage.{0,20}before|damage.{0,20}prior|damage.{0,20}existing)\b'
+    keywords:
+      positive: [pre-existing, preexisting, existing, prior, before, previous]
+      negative: []
+    auto_deny: true
+    examples:
+      - "Pre-existing damage"
+      - "Existing damage repair"
+      - "Prior damage to wall"
+    notes: "Pre-existing damage is not tenant responsibility"
+
+  - name: INELIGIBLE_UTILITIES_REGULAR
+    confidence: 85
+    patterns:
+      - '\b(electric|water|gas|sewer|utility).{0,20}\b(bill|charge|service|usage)\b'
+      - '\b(monthly|regular|routine).{0,20}\b(electric|water|gas|utility)\b'
+    keywords:
+      positive: [electric, water, gas, sewer, utility, bill, charge, service, monthly, regular, routine]
+      negative: [unpaid, outstanding, past, due]
+    examples:
+      - "Monthly electric bill"
+      - "Regular utility service charge"
+      - "Water usage charge"
+    notes: "Regular utility billing is not eligible"
+
+  - name: INELIGIBLE_LANDSCAPING
+    confidence: 85
+    patterns:
+      - '\b(landscap|lawn|yard|garden|mow|trim|hedge)\b'
+      - '\b(lawn.{0,20}maintenance|yard.{0,20}care)\b'
+    keywords:
+      positive: [landscape, landscaping, lawn, yard, garden, mow, trim, hedge, maintenance]
+      negative: []
+    examples:
+      - "Lawn maintenance"
+      - "Landscaping service"
+      - "Yard care"
+    notes: "Landscaping is typically landlord responsibility"
+
+special_rules:
+  
+  - rule_id: "AMBIGUOUS_CLEANING_DAMAGE"
+    trigger:
+      contains_all: ["clean", "damage"]
+    action:
+      status: ambiguous
+      confidence: 50
+      requires_review: true
+      reason: "Description contains both cleaning and damage keywords"
+    examples:
+      - "Clean up water damage"
+      - "Cleaning after fire damage"
+
+  - rule_id: "HIGH_AMOUNT_UNKNOWN"
+    trigger:
+      amount_above: 500
+      confidence_below: 60
+    action:
+      flag: HIGH_VALUE_UNCERTAIN
+      requires_review: true
+      reason: "High dollar amount with low classification confidence"
+
+  - rule_id: "UTILITIES_UNPAID"
+    trigger:
+      patterns: ['\b(electric|water|gas|sewer|utility)\b', '\b(unpaid|outstand|balanc)\b']
+    action:
+      status: eligible
+      category: ELIGIBLE_UTILITIES_UNPAID
+      confidence: 80
+      note: "Unpaid utilities are eligible, regular billing is not"
+
+  - rule_id: "CLEANING_ROUTINE"
+    trigger:
+      contains_all: ["clean", "routine"]
+    action:
+      status: ineligible
+      category: INELIGIBLE_ROUTINE_MAINTENANCE
+      confidence: 85
+      requires_review: false
+      reason: "Routine cleaning is not eligible"
+
+  - rule_id: "DAMAGE_NORMAL_WEAR"
+    trigger:
+      contains_all: ["damage", "normal"]
+    action:
+      status: INELIGIBLE_NORMAL_WEAR
+      confidence: 90
+      requires_review: false
+      reason: "Normal damage/wear is not eligible"
+
+threshold_rules:
+  low_confidence_review: 60
+  high_value_review: 500
+  manual_review_required: 40
+

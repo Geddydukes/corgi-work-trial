@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Eligibility Rules Schema",
+  "type": "object",
+  "required": ["version", "categories", "threshold_rules"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "description": "Semantic version of the rules"
+    },
+    "effective_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "Date when rules become effective (YYYY-MM-DD)"
+    },
+    "approval_bias": {
+      "type": "boolean",
+      "description": "Default to eligible when ambiguous"
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "confidence"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^(ELIGIBLE|INELIGIBLE|AMBIGUOUS)_[A-Z_]+$",
+            "description": "Category name starting with ELIGIBLE, INELIGIBLE, or AMBIGUOUS"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Base confidence score for this category"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Regex pattern for matching"
+            }
+          },
+          "keywords": {
+            "type": "object",
+            "properties": {
+              "positive": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Keywords that indicate this category"
+              },
+              "negative": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Keywords that exclude this category"
+              }
+            }
+          },
+          "amount_threshold": {
+            "type": "object",
+            "properties": {
+              "above": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Amount threshold above which to boost confidence"
+              },
+              "confidence_boost": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 20,
+                "description": "Confidence boost when threshold met"
+              }
+            }
+          },
+          "auto_deny": {
+            "type": "boolean",
+            "description": "Automatically deny if this category matches"
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Example descriptions that match this category"
+          },
+          "notes": {
+            "type": "string",
+            "description": "Notes about this category"
+          }
+        }
+      }
+    },
+    "special_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "trigger", "action"],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "description": "Unique identifier for the rule"
+          },
+          "trigger": {
+            "type": "object",
+            "properties": {
+              "contains_all": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "All keywords must be present"
+              },
+              "amount_above": {
+                "type": "number",
+                "minimum": 0
+              },
+              "confidence_below": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "patterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "All patterns must match"
+              }
+            }
+          },
+          "action": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["eligible", "ineligible", "ambiguous"]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "requires_review": {
+                "type": "boolean"
+              },
+              "flag": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "threshold_rules": {
+      "type": "object",
+      "required": ["low_confidence_review", "high_value_review", "manual_review_required"],
+      "properties": {
+        "low_confidence_review": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Below this confidence, flag for review"
+        },
+        "high_value_review": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Amounts above this with low confidence require review"
+        },
+        "manual_review_required": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Below this confidence, mandatory human review"
+        }
+      }
+    }
+  }
+}
+
