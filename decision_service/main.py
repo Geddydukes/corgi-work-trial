@@ -1,10 +1,16 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+from dotenv import load_dotenv
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from decision_service.routes import claims, health, batch
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 logging.basicConfig(
     level=logging.INFO,

@@ -31,6 +31,7 @@ class DecisionResponse(BaseModel):
     eligible_total: float
     invoice_total: float
     cap_amount: Optional[float] = None
+    cap_reason: Optional[str] = None  # "claim_amount", "max_benefit", "invoice_total", or combination
     claim_amount: float
     max_benefit: Optional[float] = None
     document_count: int
@@ -68,9 +69,55 @@ class DecisionResponse(BaseModel):
         return normalized
     
     @classmethod
+    def _calculate_cap_reason(cls, cap_amount: Optional[float], claim_amount: float, max_benefit: Optional[float], invoice_total: float) -> Optional[str]:
+        """Calculate why the cap is what it is."""
+        if cap_amount is None:
+            return None
+        
+        reasons = []
+        
+        # Calculate effective cap (min of claim_amount and max_benefit)
+        if claim_amount > 0 and max_benefit is not None and max_benefit > 0:
+            effective_cap = min(claim_amount, max_benefit)
+            if effective_cap == claim_amount:
+                reasons.append("claim_amount")
+            if effective_cap == max_benefit:
+                reasons.append("max_benefit")
+        elif claim_amount > 0:
+            effective_cap = claim_amount
+            reasons.append("claim_amount")
+        elif max_benefit is not None and max_benefit > 0:
+            effective_cap = max_benefit
+            reasons.append("max_benefit")
+        else:
+            effective_cap = None
+        
+        # Check if invoice_total is the limiting factor
+        if effective_cap is not None and invoice_total < effective_cap:
+            reasons.append("invoice_total")
+        
+        if not reasons:
+            return None
+        
+        # Return the most specific reason
+        if "invoice_total" in reasons:
+            return "invoice_total"
+        elif len(reasons) == 2 and "claim_amount" in reasons and "max_benefit" in reasons:
+            return "claim_amount_and_max_benefit"
+        else:
+            return reasons[0]
+    
+    @classmethod
     def from_decision_record(cls, record: dict) -> "DecisionResponse":
         approved_items = cls._normalize_line_items(record.get("approved_line_items", []))
         ineligible_items = cls._normalize_line_items(record.get("ineligible_line_items", []))
+        
+        cap_amount = float(record["cap_amount"]) if record.get("cap_amount") else None
+        claim_amount = float(record.get("claim_amount", 0.0))
+        max_benefit = float(record["max_benefit"]) if record.get("max_benefit") else None
+        invoice_total = float(record["invoice_total"])
+        
+        cap_reason = cls._calculate_cap_reason(cap_amount, claim_amount, max_benefit, invoice_total)
         
         return cls(
             decision_id=record["id"],
@@ -80,10 +127,11 @@ class DecisionResponse(BaseModel):
             proposed_status=record["proposed_status"],
             proposed_benefit_amount=float(record["proposed_benefit_amount"]),
             eligible_total=float(record["eligible_total"]),
-            invoice_total=float(record["invoice_total"]),
-            cap_amount=float(record["cap_amount"]) if record.get("cap_amount") else None,
-            claim_amount=float(record.get("claim_amount", 0.0)),
-            max_benefit=float(record["max_benefit"]) if record.get("max_benefit") else None,
+            invoice_total=invoice_total,
+            cap_amount=cap_amount,
+            cap_reason=cap_reason,
+            claim_amount=claim_amount,
+            max_benefit=max_benefit,
             document_count=record.get("document_count", 0),
             line_item_count=record.get("line_item_count", 0),
             approved_line_items=approved_items,

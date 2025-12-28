@@ -125,7 +125,21 @@ class DecisionEngine:
             
             if is_invoice_or_statement and text:
                 logger.info(f"Extracting line items from {filename}...")
-                extracted_items = self.document_analyzer.extract_line_items_from_invoice(text, filename)
+                extracted_items = []
+                try:
+                    extracted_items = self.document_analyzer.extract_line_items_from_invoice(text, filename)
+                except Exception as e:
+                    logger.warning(f"Gemini line item extraction failed for {filename}: {e}, falling back to InvoiceParser")
+                    # Fallback to InvoiceParser if Gemini fails
+                    try:
+                        from decision_service.engine.invoice_parser import InvoiceParser
+                        parser = InvoiceParser()
+                        parse_result = await parser.parse_documents([doc])
+                        if parse_result.get("line_items"):
+                            extracted_items = parse_result["line_items"]
+                    except Exception as fallback_error:
+                        logger.error(f"InvoiceParser fallback also failed for {filename}: {fallback_error}")
+                
                 if extracted_items:
                     all_line_items.extend(extracted_items)
                     # Calculate invoice_total as sum of POSITIVE charges only (exclude payments/credits and prior balances)

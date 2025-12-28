@@ -59,7 +59,6 @@ class GoogleDriveService:
         try:
             from google.oauth2 import service_account
             from googleapiclient.discovery import build
-            from googleapiclient.http import MediaIoBaseDownload
             from googleapiclient.errors import HttpError
         except ImportError:
             raise ImportError(
@@ -197,6 +196,8 @@ class GoogleDriveService:
                 request = service.files().get_media(fileId=file_id)
             
             file_stream = io.BytesIO()
+            # Import here to avoid issues with module-level import
+            from googleapiclient.http import MediaIoBaseDownload
             downloader = MediaIoBaseDownload(file_stream, request)
             
             done = False

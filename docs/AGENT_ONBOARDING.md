@@ -36,21 +36,32 @@
 
    - Port: 8000 (default)
    - Main entry: `decision_service/main.py`
-   - Routes: `decision_service/routes/claims.py`
+   - Routes: `decision_service/routes/claims.py`, `decision_service/routes/batch.py`
+   - Database connection pooling for optimized performance
+   - Google Drive integration for document processing
 
 2. **Document Service** (`document_service/`) - FastAPI service for document processing
 
    - Port: 8001 (default)
    - Main entry: `document_service/main.py`
    - Routes: `document_service/routes/documents.py`
+   - Parallel processing support for Google Drive documents
 
-3. **Shared Code** (`shared/`) - Common utilities, models, config
+3. **Frontend** (`frontend/`) - Next.js web application for decision review
+
+   - Port: 3000 (default)
+   - Next.js 14+ with TypeScript
+   - Components: `DecisionViewer`, `DecisionSummary`, `LineItemsList`
+   - Features: Line item toggles, cap management, status override, Google Drive auto-processing
+
+4. **Shared Code** (`shared/`) - Common utilities, models, config
 
    - Models: `shared/models.py`
    - Config: `shared/config.py`
    - Deduplication: `shared/deduplication.py`
+   - Google Drive: `shared/google_drive.py`
 
-4. **Task Queue** (`tasks/`) - Celery for async processing
+5. **Task Queue** (`tasks/`) - Celery for async processing
    - Celery app: `tasks/celery_app.py`
 
 ---
@@ -252,8 +263,14 @@
 
 **decisions**
 
-- Fields: `id`, `claim_id`, `status` (approve/deny), `benefit_amount`, `confidence_score`, `reasoning` (JSONB, encrypted), `deleted_at`
-- Foreign Key: `claim_id → claims.id` (RESTRICT on delete)
+- Fields: `id`, `claim_id`, `decision_type` (initial, appeal, reconsideration), `proposed_status` (approve/deny), `proposed_benefit_amount`, `eligible_total`, `invoice_total`, `cap_amount`, `approved_line_items` (JSONB), `ineligible_line_items` (JSONB), `flags` (JSONB), `missing_data` (JSONB), `reasoning` (JSONB), `confidence_score`, `engine_version`, `processing_time_ms`, `decided_by`, `decided_at`, `is_active`, `created_at`
+- Foreign Key: `claim_id → claims.id` (CASCADE on delete)
+- Decision type enum: 'initial', 'appeal', 'reconsideration'
+
+**user_line_item_overrides**
+
+- Fields: `id`, `decision_id`, `claim_id`, `line_item_index`, `line_item_description`, `line_item_amount`, `system_should_be_included`, `user_should_be_included`, `user_reasoning`, `override_timestamp`
+- Stores user overrides for rule refinement
 
 **decision_audit_log**
 

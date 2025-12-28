@@ -47,6 +47,10 @@ variance_report_*.txt
 .env.local
 .env.*.local
 
+# Google Drive credentials
+google-drive-credentials.json
+*credentials*.json
+
 # IDE
 .idea/
 .vscode/

@@ -133,7 +133,6 @@ RESPONSE FORMAT (JSON only):
             import google.generativeai as genai
             
             genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
             
             prompt = f"""Extract line items from this invoice/statement document.
 
@@ -176,7 +175,8 @@ RESPONSE FORMAT (JSON only):
     "confidence": 0.0-1.0
 }}"""
             
-            logger.info(f"Extracting line items from {filename} with Gemini 2.5 Pro...")
+            logger.info(f"Extracting line items from {filename} with Gemini 2.5 Flash...")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(prompt)
             response_text = response.text.strip()
             
@@ -293,8 +293,7 @@ For EACH line item, provide:
 
 4. **Brief reasoning**: Explain your categorization
 
-NOTE: The "should_be_included" field is required by the schema but will be IGNORED.
-Deterministic rules will decide coverage based on category tags, not this field.
+The "should_be_included" field is required by the schema but will be ignored. Deterministic rules will decide coverage based on category tags, not this field.
 
 REQUIRED OUTPUT FORMAT (JSON ONLY - no markdown, no explanations outside JSON):
 {{
