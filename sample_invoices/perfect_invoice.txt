@@ -1,0 +1,21 @@
+INVOICE #INV-2024-001
+Date: January 15, 2024
+Due Date: February 15, 2024
+
+Property: 123 Main Street, Apt 4B
+Tenant: John Doe
+
+Description                    Amount
+─────────────────────────────────────
+Cleaning Service               $150.00
+Carpet Repair                  $75.50
+Paint Touch-up                 $45.25
+Window Cleaning                $30.00
+
+─────────────────────────────────────
+Subtotal                       $300.75
+Sales Tax (8%)                 $24.06
+
+─────────────────────────────────────
+Total                          $324.81
+

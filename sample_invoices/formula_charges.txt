@@ -1,0 +1,11 @@
+INVOICE #INV-2024-003
+
+Description                    Amount
+─────────────────────────────────────
+Labor: 3 hours × $25/hour      $75.00
+Materials: 5 units × $10        $50.00
+Service: 2 × $15                $30.00
+
+─────────────────────────────────────
+Total                          $155.00
+

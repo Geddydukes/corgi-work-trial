@@ -73,3 +73,61 @@ def process_document_batch(
     
     return results
 
+
+@app.task(bind=True, max_retries=3, default_retry_delay=60)
+def evaluate_claim_task(self, claim_id: int, batch_id: str) -> dict:
+    """
+    Process a single claim in a batch.
+    
+    This task is called by the batch processing system to evaluate a claim
+    asynchronously. It updates the batch status after completion.
+    """
+    from decision_service.repositories.batch_repository import BatchRepository
+    from decision_service.engine.decision_engine import DecisionEngine
+    from decision_service.repositories.claim_repository import ClaimRepository
+    
+    batch_repo = BatchRepository()
+    claim_repo = ClaimRepository()
+    
+    try:
+        asyncio.run(batch_repo.update_batch_status(batch_id, claim_id, 'processing'))
+        
+        engine = DecisionEngine()
+        decision = asyncio.run(engine.evaluate_claim(claim_id=claim_id))
+        
+        decision_record = asyncio.run(claim_repo.create_decision(decision, user_id="system"))
+        
+        asyncio.run(batch_repo.update_batch_status(batch_id, claim_id, 'completed'))
+        
+        batch_status = asyncio.run(batch_repo.get_batch_job(batch_id))
+        
+        if batch_status and batch_status["status"] == "completed":
+            logger.info(f"Batch {batch_id} completed. All claims processed.")
+        
+        return {
+            "claim_id": claim_id,
+            "batch_id": batch_id,
+            "status": "completed",
+            "decision_id": decision_record["id"] if decision_record else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing claim {claim_id} in batch {batch_id}: {e}", exc_info=True)
+        
+        asyncio.run(batch_repo.update_batch_status(
+            batch_id,
+            claim_id,
+            'failed',
+            error_message=str(e)
+        ))
+        
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+        else:
+            return {
+                "claim_id": claim_id,
+                "batch_id": batch_id,
+                "status": "failed",
+                "error": str(e)
+            }
+

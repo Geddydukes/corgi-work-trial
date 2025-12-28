@@ -4,7 +4,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from shared.config import Config
 
@@ -119,7 +119,7 @@ class SLATracker:
             by_document_type=by_type,
         )
     
-    def check_sla_compliance(self) -> tuple[bool, Dict[str, bool]]:
+    def check_sla_compliance(self) -> Tuple[bool, Dict[str, bool]]:
         """
         Check SLA compliance against targets.
         

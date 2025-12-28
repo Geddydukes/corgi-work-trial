@@ -1,0 +1,12 @@
+INVOICE #INV-2024-002
+
+Description                    Amount
+─────────────────────────────────────
+Cleaning Service               $150.00
+Repairs                        $75.00
+Credit for overcharge         ($25.00)
+Refund - duplicate charge     -$10.00
+
+─────────────────────────────────────
+Total                          $190.00
+

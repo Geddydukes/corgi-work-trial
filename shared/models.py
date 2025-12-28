@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -73,7 +73,7 @@ class ExtractionAttempt(BaseModel):
 class ExtractedText(BaseModel):
     text: str
     confidence: float = Field(..., ge=0.0, le=100.0)
-    tier_used: OCRTier
+    tier_used: Optional[OCRTier] = None
     page_wise_text: List[str] = Field(default_factory=list)
     page_wise_confidence: List[float] = Field(default_factory=list)
     redacted_text: Optional[str] = None
@@ -92,7 +92,7 @@ class DocumentClassification(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     feature_scores: FeatureScores = Field(default_factory=FeatureScores)
     fallback_used: bool = False
-    ml_probabilities: dict[str, float] = Field(default_factory=dict)
+    ml_probabilities: Dict[str, float] = Field(default_factory=dict)
 
 
 class QualityMetrics(BaseModel):
@@ -106,7 +106,7 @@ class QualityMetrics(BaseModel):
 
 class ProcessingMetrics(BaseModel):
     total_time_ms: int
-    tier_used: OCRTier
+    tier_used: Optional[OCRTier] = None
     retry_count: int = 0
     pages_processed: int
     tier1_attempts: int = 0
@@ -122,14 +122,14 @@ class CostBreakdown(BaseModel):
 
 @dataclass
 class DocumentProcessingResult:
-    processing_id: str = field(default_factory=lambda: str(uuid4()))
     claim_id: int
     file_metadata: FileMetadata
-    extraction_attempts: List[ExtractionAttempt] = field(default_factory=list)
     best_extraction: ExtractedText
     classification: DocumentClassification
     quality_metrics: QualityMetrics
     processing_metrics: ProcessingMetrics
+    processing_id: str = field(default_factory=lambda: str(uuid4()))
+    extraction_attempts: List[ExtractionAttempt] = field(default_factory=list)
     errors: List[ProcessingError] = field(default_factory=list)
     requires_manual_review: bool = False
     manual_review_reasons: List[str] = field(default_factory=list)

@@ -11,8 +11,8 @@ import PyPDF2
 from PIL import Image
 from pypdf import PdfReader
 
-import config
-from models import (
+from shared import config
+from shared.models import (
     ExtractionAttempt,
     OCRTier,
     ProcessingError,

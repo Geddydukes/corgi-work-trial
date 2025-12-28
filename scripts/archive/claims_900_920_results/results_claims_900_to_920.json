@@ -1,0 +1,42 @@
+{
+  "evaluation_range": {
+    "start_claim": 900,
+    "end_claim": 920
+  },
+  "metrics": {
+    "total_claims": 21,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "true_positives": 19,
+    "true_negatives": 2,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "mean_absolute_error": 0.0,
+    "root_mean_squared_error": 0.0,
+    "mean_absolute_percentage_error": 0.0,
+    "median_absolute_error": 0.0,
+    "avg_proposed_benefit": 1449.2210526315787,
+    "avg_actual_benefit": 1449.2210526315787,
+    "bias_direction": "neutral",
+    "bias_magnitude": 0.0,
+    "complete_data_rate": 1.0,
+    "manual_review_rate": 0.0,
+    "avg_confidence_score": 100.0,
+    "avg_processing_time_ms": 0.0,
+    "status_mismatches": 0,
+    "amount_over_by_50_plus": 0,
+    "amount_under_by_50_plus": 0
+  },
+  "mismatches": [],
+  "summary": {
+    "total_claims": 21,
+    "accuracy": 1.0,
+    "mae": 0.0,
+    "mape": 0.0,
+    "status_mismatches": 0,
+    "amount_over_50": 0,
+    "amount_under_50": 0
+  }
+}

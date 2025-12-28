@@ -24,6 +24,7 @@ from shared.error_budget_tracker import ErrorBudgetTracker
 from shared.language_detector import LanguageDetector
 from shared.models import (
     CostBreakdown,
+    DocumentClassification,
     DocumentProcessingResult,
     DocumentType,
     ExtractedText,
@@ -125,13 +126,13 @@ class DocumentProcessor:
                 best_extraction = ExtractedText(
                     text="",
                     confidence=0.0,
-                    tier=extraction_attempts[0].tier if extraction_attempts else None,
+                    tier_used=extraction_attempts[0].tier if extraction_attempts else None,
                 )
             else:
                 best_extraction = ExtractedText(
                     text=best_attempt.extracted_text,
                     confidence=best_attempt.confidence,
-                    tier=best_attempt.tier,
+                    tier_used=best_attempt.tier,
                 )
             
             if best_extraction.text and config.Config.LANGUAGE_DETECTION_ENABLED:
@@ -157,7 +158,70 @@ class DocumentProcessor:
                 best_extraction,
                 file_metadata.page_count,
                 best_extraction.confidence,
+                filename=file_metadata.original_filename,
             )
+            
+            # Escalate to Tier 3 OCR if:
+            # 1. Classification is UNKNOWN (regardless of confidence)
+            # 2. Classification confidence is too low (< 75%)
+            # 3. OCR confidence is below 85%
+            from shared.models import DocumentType
+            
+            is_unknown = classification.document_type == DocumentType.UNKNOWN
+            low_classification_confidence = classification.confidence < config.Config.CLASSIFICATION_CONFIDENCE_THRESHOLD
+            low_ocr_confidence = best_extraction.confidence < 85.0
+            
+            should_escalate = (
+                (is_unknown or low_classification_confidence or low_ocr_confidence) and
+                not force_high_quality and 
+                config.Config.OCR_TIER3_ENABLED
+            )
+            
+            # Check if we haven't already used Tier 3
+            already_tier3 = (
+                best_extraction.tier_used is not None and 
+                "tier3" in best_extraction.tier_used.value
+            )
+            
+            if should_escalate and not already_tier3:
+                escalation_reason = []
+                if is_unknown:
+                    escalation_reason.append("document classified as UNKNOWN")
+                if low_classification_confidence:
+                    escalation_reason.append(f"low classification confidence ({classification.confidence*100:.1f}%)")
+                if low_ocr_confidence:
+                    escalation_reason.append(f"low OCR confidence ({best_extraction.confidence:.1f}%)")
+                
+                logger.warning(
+                    f"Escalating to Tier 3 OCR: {', '.join(escalation_reason)} "
+                    f"(current tier: {best_extraction.tier_used.value if best_extraction.tier_used else 'none'})"
+                )
+                logger.warning(
+                    f"Low classification confidence ({classification.confidence*100:.1f}%) "
+                    f"with {best_extraction.tier_used.value}, retrying with Tier 3 OCR"
+                )
+                # Retry with Tier 3
+                tier3_attempts, tier3_best = self.ocr_service.extract_with_attempts(
+                    file_path, is_native_pdf=is_native_pdf, force_high_quality=True
+                )
+                if tier3_best and tier3_best.extracted_text:
+                    extraction_attempts.extend(tier3_attempts)
+                    best_attempt = tier3_best
+                    best_extraction = ExtractedText(
+                        text=tier3_best.extracted_text,
+                        confidence=tier3_best.confidence,
+                        tier_used=tier3_best.tier,
+                    )
+                    # Re-classify with better OCR (pass filename for move-out-statement detection)
+                    classification = self.classifier.classify(
+                        best_extraction, file_metadata.page_count, best_extraction.confidence,
+                        filename=file_metadata.original_filename
+                    )
+                    logger.info(
+                        f"Tier 3 OCR improved classification confidence to {classification.confidence*100:.1f}%"
+                    )
+                    # Re-assess quality with new extraction
+                    quality_metrics = self._assess_quality(best_extraction, file_metadata.page_count)
             
             requires_manual_review, review_reasons = self._determine_manual_review(
                 classification, quality_metrics, best_extraction.confidence
@@ -487,7 +551,7 @@ class DocumentProcessor:
     
     def _result_from_dict(self, data: dict) -> DocumentProcessingResult:
         """Reconstruct DocumentProcessingResult from dictionary."""
-        from models import (
+        from shared.models import (
             FileMetadata, ExtractedText, DocumentClassification,
             QualityMetrics, ProcessingMetrics, CostBreakdown,
             ExtractionAttempt, ProcessingError,
@@ -519,7 +583,7 @@ class DocumentProcessor:
         error_type: ProcessingErrorType,
     ) -> DocumentProcessingResult:
         """Create error result when processing fails."""
-        from models import FileMetadata, ExtractedText, DocumentClassification, QualityMetrics, ProcessingMetrics
+        from shared.models import FileMetadata, ExtractedText, DocumentClassification, QualityMetrics, ProcessingMetrics
         
         return DocumentProcessingResult(
             processing_id=processing_id,
@@ -535,7 +599,7 @@ class DocumentProcessor:
             best_extraction=ExtractedText(
                 text="",
                 confidence=0.0,
-                tier=None,
+                tier_used=None,
             ),
             classification=DocumentClassification(
                 document_type=DocumentType.UNKNOWN,

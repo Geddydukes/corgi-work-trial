@@ -26,6 +26,9 @@ class Config:
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     
+    GOOGLE_DRIVE_CREDENTIALS: Optional[str] = os.getenv("GOOGLE_DRIVE_CREDENTIALS")
+    GOOGLE_DRIVE_USE_SERVICE_ACCOUNT: bool = os.getenv("GOOGLE_DRIVE_USE_SERVICE_ACCOUNT", "true").lower() == "true"
+    
     MISTRAL_API_KEY: Optional[str] = os.getenv("MISTRAL_API_KEY")
     MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "pixtral-12b-2409")
     

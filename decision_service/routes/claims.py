@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Query
 from typing import Optional
 from uuid import uuid4
 
 from decision_service.schemas.request import DecisionRequest
 from decision_service.schemas.response import DecisionResponse
+from shared.models import DocumentType
 
 router = APIRouter()
 
@@ -52,11 +53,23 @@ async def create_decision(
 
 
 @router.get("/claims/{tracking_number}/documents")
-async def get_claim_documents(tracking_number: str):
+async def get_claim_documents(
+    tracking_number: str,
+    document_type: Optional[DocumentType] = Query(None, description="Filter by document type")
+):
+    """
+    Get documents for a claim.
+    
+    Returns metadata for all documents associated with a claim.
+    Optionally filter by document type.
+    """
     from decision_service.repositories.document_repository import DocumentRepository
     
     repository = DocumentRepository()
-    documents = await repository.get_documents_by_tracking_number(tracking_number)
+    documents = await repository.get_documents_by_tracking_number(
+        tracking_number,
+        document_type=document_type.value if document_type else None
+    )
     
     if not documents:
         raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")

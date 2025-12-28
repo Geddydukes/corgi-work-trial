@@ -1,0 +1,5 @@
+claim_id,claim_tracking_number,proposed_status,actual_status,proposed_benefit,actual_benefit,difference,mismatch_type,likely_cause,flags,confidence,needs_review
+3388,900,approve,deny,1500.0,0.0,0.0,status_only,False positive: System approved ineligible charges,"['credits_detected: 4 credit items found', 'low_document_confidence_0.6%_reduces_decision_confidence_to_55.4%']",55.37,True
+3389,901,approve,approve,1500.0,770.0,730.0,amount_only,Amount too high: Possible eligibility over-classification or cap miscalculation,"['credits_detected: 9 credit items found', 'low_document_confidence_0.7%_reduces_decision_confidence_to_55.4%']",55.42,True
+3390,902,approve,approve,1500.0,100.0,1400.0,amount_only,Amount too high: Possible eligibility over-classification or cap miscalculation,"['credits_detected: 9 credit items found', 'low_document_confidence_0.7%_reduces_decision_confidence_to_55.4%']",55.42,True
+3391,903,approve,approve,1500.0,190.0,1310.0,amount_only,Amount too high: Possible eligibility over-classification or cap miscalculation,"['credits_detected: 9 credit items found', 'low_document_confidence_0.7%_reduces_decision_confidence_to_55.4%']",55.41,True

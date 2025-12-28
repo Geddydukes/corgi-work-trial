@@ -30,3 +30,30 @@ ENV/
 *~
 .DS_Store
 
+# Log files
+*.log
+run_output_*.log
+claim_*.log
+
+# Variance reports (generated files)
+variance_report_*.txt
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment files
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+

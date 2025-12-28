@@ -238,7 +238,11 @@ class AdvancedInvoiceParser:
             processing_time_ms=processing_time_ms
         )
         
-        calculated_total = sum(item.amount for item in regular_items + taxes + fees) - sum(abs(item.amount) for item in credits)
+        # Calculate total: regular items + taxes + fees - credits
+        # Credits are stored as negative amounts (from amount_extractor), so we sum all items
+        # This ensures correct math: if credit is -$50, it's already negative in the amount
+        all_items_for_total = regular_items + taxes + fees + credits
+        calculated_total = sum(item.amount for item in all_items_for_total)
         
         return InvoiceParseResult(
             line_items=regular_items,

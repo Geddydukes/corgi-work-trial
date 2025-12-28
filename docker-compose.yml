@@ -133,7 +133,10 @@ services:
       LOG_LEVEL: DEBUG
       OCR_TIER1_ENABLED: "true"
       OCR_TIER2_ENABLED: "true"
-      OCR_TIER3_ENABLED: "false"
+      OCR_TIER3_ENABLED: "true"
+      TIER3_PROVIDER: "gemini"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: "gemini-1.5-flash"
     ports:
       - "8001:8001"
     depends_on:
@@ -165,7 +168,10 @@ services:
       LOG_LEVEL: INFO
       OCR_TIER1_ENABLED: "true"
       OCR_TIER2_ENABLED: "true"
-      OCR_TIER3_ENABLED: "false"
+      OCR_TIER3_ENABLED: "true"
+      TIER3_PROVIDER: "gemini"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: "gemini-1.5-flash"
     depends_on:
       postgres:
         condition: service_healthy

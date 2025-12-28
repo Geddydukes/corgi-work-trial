@@ -9,8 +9,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
-import config
-from models import (
+from shared import config
+from shared.models import (
     DocumentClassification,
     DocumentType,
     ExtractedText,
@@ -69,6 +69,7 @@ class DocumentClassifier:
         extracted_text: ExtractedText,
         page_count: int,
         ocr_confidence: float,
+        filename: Optional[str] = None,
     ) -> DocumentClassification:
         """
         Classify document using ML with rule-based fallback.
@@ -82,6 +83,7 @@ class DocumentClassifier:
             DocumentClassification result
         """
         text = extracted_text.text.lower()
+        filename_lower = filename.lower() if filename else ""
         
         feature_scores = self._extract_features(text, page_count)
         
@@ -117,7 +119,7 @@ class DocumentClassifier:
                     ml_probabilities=ml_probabilities,
                 )
         
-        rule_result = self._classify_with_rules(text, page_count, feature_scores)
+        rule_result = self._classify_with_rules(text, page_count, feature_scores, filename_lower)
         
         if rule_result["confidence"] >= config.Config.CLASSIFICATION_CONFIDENCE_THRESHOLD:
             return DocumentClassification(
@@ -155,7 +157,11 @@ class DocumentClassifier:
     def _calculate_keyword_score(self, text: str) -> float:
         """Calculate keyword presence score."""
         lease_keywords = ["lease agreement", "term:", "monthly rent", "tenant", "landlord"]
-        invoice_keywords = ["invoice", "balance due", "total", "amount due", "itemized"]
+        invoice_keywords = [
+            "invoice", "balance due", "total", "amount due", "itemized",
+            "move-out-statement", "move out statement", "move-out statement", 
+            "moveout statement", "move-out-stmt", "move out stmt"
+        ]
         addendum_keywords = ["addendum", "security deposit waiver", "enrollment"]
         
         lease_matches = sum(1 for kw in lease_keywords if kw in text)
@@ -222,7 +228,7 @@ class DocumentClassifier:
         
         return 0.2
     
-    def _classify_with_rules(self, text: str, page_count: int, feature_scores: FeatureScores) -> Dict:
+    def _classify_with_rules(self, text: str, page_count: int, feature_scores: FeatureScores, filename: str = "") -> Dict:
         """Classify using rule-based approach."""
         lease_score = 0.0
         invoice_score = 0.0
@@ -237,9 +243,18 @@ class DocumentClassifier:
         if feature_scores.date_pattern_score > 0.5:
             lease_score += 0.1
         
+        # Check for move-out-statement patterns in filename (strong indicator)
+        # This is a very strong signal - if filename matches, classify as invoice
+        move_out_patterns = [
+            'move-out-statement', 'move out statement', 'move-out statement',
+            'moveout statement', 'move-out-stmt', 'move out stmt'
+        ]
+        if filename and any(pattern in filename.lower() for pattern in move_out_patterns):
+            invoice_score = 1.0  # Strong signal - set to maximum
+        
         if "invoice" in text:
             invoice_score += 0.4
-        if "balance due" in text or "total" in text.lower():
+        if "balance due" in text or "total" in text.lower() or "statement" in text:
             invoice_score += 0.3
         if feature_scores.dollar_amount_score > 0.5:
             invoice_score += 0.2

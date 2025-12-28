@@ -14,8 +14,13 @@ class ReconciliationEngine:
         taxes: List[LineItem],
         fees: List[LineItem]
     ) -> ReconciliationResult:
-        all_items = line_items + credits + taxes + fees
-        calculated_total = sum(item.amount for item in all_items)
+        # Calculate total: regular items + taxes + fees - credits
+        # Credits are stored as positive amounts with is_credit=True flag
+        regular_total = sum(item.amount for item in line_items)
+        taxes_total = sum(item.amount for item in taxes)
+        fees_total = sum(item.amount for item in fees)
+        credits_total = sum(item.amount for item in credits)
+        calculated_total = regular_total + taxes_total + fees_total - credits_total
         
         if stated_total is None:
             return ReconciliationResult(
