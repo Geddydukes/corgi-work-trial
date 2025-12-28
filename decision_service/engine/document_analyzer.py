@@ -322,24 +322,65 @@ VALIDATION RULES:
 """
             
             logger.info(f"Batch analyzing {len(line_items)} line items with Gemini 2.5 Flash...")
-            response = model.generate_content(prompt)
-            response_text = response.text.strip()
             
-            # Use JSON validator
-            validated_analyses, validation_errors, json_validation_failed = parse_and_validate_line_item_analysis(
-                response_text, len(line_items), default_on_failure=True
-            )
+            # Retry LLM call if JSON validation fails
+            max_llm_retries = 3
+            validated_analyses = None
+            validation_errors = []
+            json_validation_failed = False
+            response_text = None
+            
+            for llm_attempt in range(max_llm_retries):
+                try:
+                    response = model.generate_content(prompt)
+                    response_text = response.text.strip()
+                    
+                    # Use JSON validator with retries for parsing
+                    validated_analyses, validation_errors, json_validation_failed = parse_and_validate_line_item_analysis(
+                        response_text, len(line_items), max_retries=2, default_on_failure=False
+                    )
+                    
+                    # If validation succeeded, break out of retry loop
+                    if validated_analyses and not json_validation_failed:
+                        if llm_attempt > 0:
+                            logger.info(f"JSON validation succeeded on retry attempt {llm_attempt + 1}")
+                        break
+                    
+                    # If this is not the last attempt, log and retry
+                    if llm_attempt < max_llm_retries - 1:
+                        logger.warning(f"JSON validation failed on attempt {llm_attempt + 1}/{max_llm_retries}: {validation_errors[:3]}")
+                        logger.info(f"Retrying LLM call...")
+                    else:
+                        # Last attempt failed - use default fallback
+                        logger.error(f"JSON validation failed after {max_llm_retries} LLM attempts. Using default-include fallback.")
+                        validated_analyses, validation_errors, json_validation_failed = parse_and_validate_line_item_analysis(
+                            response_text, len(line_items), max_retries=0, default_on_failure=True
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Error calling LLM on attempt {llm_attempt + 1}: {e}")
+                    if llm_attempt == max_llm_retries - 1:
+                        # Final attempt failed - use default fallback
+                        logger.error("All LLM retry attempts failed. Using default-include fallback.")
+                        validated_analyses, validation_errors, json_validation_failed = parse_and_validate_line_item_analysis(
+                            "", len(line_items), max_retries=0, default_on_failure=True
+                        )
             
             if validation_errors:
-                logger.warning(f"JSON validation errors: {validation_errors}")
-                logger.debug(f"Response was: {response_text[:1000]}")
+                logger.warning(f"JSON validation errors: {validation_errors[:5]}")  # Show first 5 errors
+                if response_text:
+                    logger.debug(f"Response was: {response_text[:500]}")
             
             if not validated_analyses:
                 logger.error("Failed to validate JSON response even with default fallback")
+                # Mark all items as having JSON validation failed
+                for item in line_items:
+                    item['json_validation_failed'] = True
                 return line_items
             
             if json_validation_failed:
                 logger.warning("JSON validation failed - using default-include analyses, deterministic rules will filter")
+                # Flag this in all items for tracking
                 for item in line_items:
                     item['json_validation_failed'] = True
             
@@ -350,6 +391,7 @@ VALIDATION RULES:
             for i, analysis in enumerate(analyses):
                 llm_suggestions.append({
                     'is_normal_wear_tear': analysis.is_normal_wear_tear,
+                    'is_covered_by_addendum': analysis.is_covered_by_addendum,
                     'confidence': analysis.confidence,
                     'reasoning': analysis.reasoning
                 })
@@ -368,6 +410,7 @@ VALIDATION RULES:
                 item['llm_reasoning'] = analysis.reasoning
                 item['llm_addendum_reference'] = analysis.addendum_reference
                 item['llm_suggested_included'] = analysis.should_be_included
+                item['is_covered_by_addendum'] = analysis.is_covered_by_addendum  # Preserve for deterministic rules
             
             # Enforce claim_amount constraint (after deterministic rules applied)
             if claim_amount is not None and flagged_items:

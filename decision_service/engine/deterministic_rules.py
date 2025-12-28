@@ -182,7 +182,8 @@ def categorize_line_item(
 def should_be_included_deterministic(
     category: LineItemCategory,
     is_normal_wear_tear: bool = False,
-    amount: Optional[Decimal] = None
+    amount: Optional[Decimal] = None,
+    is_covered_by_addendum: bool = True  # Default to True (assume covered unless explicitly denied)
 ) -> bool:
     """
     Deterministically determine if a line item should be included.
@@ -191,6 +192,7 @@ def should_be_included_deterministic(
         category: LineItemCategory from phrase matching
         is_normal_wear_tear: Whether item is normal wear/tear (from LLM suggestion or rules)
         amount: Line item amount (for sanity checks)
+        is_covered_by_addendum: Whether LLM determined item is covered by addendum
     
     Returns:
         True if item should be included in approved benefit
@@ -199,6 +201,7 @@ def should_be_included_deterministic(
         if amount > Decimal("100000") or amount < Decimal("0"):
             return False
     
+    # Auto-deny categories (regardless of addendum coverage)
     if category.is_rent:
         return False
     
@@ -220,10 +223,19 @@ def should_be_included_deterministic(
     if is_normal_wear_tear:
         return False
     
+    # If not covered by addendum, deny (unless it's a clear damage/repair/cleaning)
+    if not is_covered_by_addendum:
+        # Only approve if it's clearly damage/repair/cleaning (might be misclassified)
+        if category.is_cleaning or category.is_repair or category.is_damage:
+            return True
+        return False
+    
+    # If covered by addendum and not in denial categories, approve
     if category.is_cleaning or category.is_repair or category.is_damage:
         return True
     
-    return False
+    # Default: if covered by addendum and no explicit denial category, approve
+    return True
 
 
 def is_cleaning_only_invoice(line_items: List[Dict]) -> bool:
@@ -305,13 +317,20 @@ def apply_deterministic_rules(
         )
         
         is_normal_wear_tear = False
+        is_covered_by_addendum = True  # Default to True
         if llm_suggestions and i < len(llm_suggestions):
             is_normal_wear_tear = llm_suggestions[i].get('is_normal_wear_tear', False)
+            is_covered_by_addendum = llm_suggestions[i].get('is_covered_by_addendum', True)
+        
+        # Also check if item already has is_covered_by_addendum flag (from LLM analysis)
+        if 'is_covered_by_addendum' in item:
+            is_covered_by_addendum = item.get('is_covered_by_addendum', True)
         
         should_include = should_be_included_deterministic(
             category=category,
             is_normal_wear_tear=is_normal_wear_tear,
-            amount=amount
+            amount=amount,
+            is_covered_by_addendum=is_covered_by_addendum
         )
         
         # Override: if cleaning-only invoice, deny all cleaning items
@@ -335,6 +354,7 @@ def apply_deterministic_rules(
             'is_contractual_fee': category.is_contractual_fee,
             'is_after_lease_end': category.is_after_lease_end,
             'is_normal_wear_tear': is_normal_wear_tear,
+            'is_covered_by_addendum': is_covered_by_addendum,  # Preserve LLM's determination
             'deterministic_rule_applied': True
         }
         

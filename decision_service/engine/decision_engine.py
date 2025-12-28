@@ -181,6 +181,7 @@ class DecisionEngine:
         
         # Analyze all line items in batch with Gemini
         line_items_with_flags = []
+        json_validation_failed_count = 0
         if invoice_data.get("line_items"):
             logger.info(f"Batch analyzing {len(invoice_data['line_items'])} line items with Gemini 2.5 Pro...")
             line_items_with_flags = self.document_analyzer.analyze_line_items_batch(
@@ -188,6 +189,13 @@ class DecisionEngine:
                 addendum_text,
                 claim_context
             )
+            
+            # Check for JSON validation failures and flag in decision
+            json_validation_failed_count = sum(1 for item in line_items_with_flags if item.get('json_validation_failed', False))
+            if json_validation_failed_count > 0:
+                logger.warning(f"JSON validation failed for {json_validation_failed_count} out of {len(line_items_with_flags)} line items")
+                invoice_data["flags"]["warnings"].append(f"json_validation_failed_for_{json_validation_failed_count}_line_items")
+                invoice_data["flags"]["critical"].append("llm_json_validation_failure")
             
             # Update invoice_data with flagged line items
             invoice_data["line_items"] = line_items_with_flags

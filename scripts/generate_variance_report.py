@@ -115,14 +115,52 @@ def generate_variance_report(start_tracking: int = 900, end_tracking: int = 904)
             
             if approved_items:
                 print(f"  Approved Line Items ({len(approved_items)}):")
-                for item in approved_items[:5]:  # Show first 5
+                for item in approved_items[:10]:  # Show first 10
                     if isinstance(item, dict):
                         line_item = item.get('line_item', item)
                         amount = line_item.get('amount', 0)
                         desc = line_item.get('description', 'N/A')
-                        print(f"    - ${amount:>10,.2f}  {desc[:60]}")
-                if len(approved_items) > 5:
-                    print(f"    ... and {len(approved_items) - 5} more")
+                        analysis = item.get('analysis', {})
+                        reasoning = analysis.get('reasoning', '')[:80] if analysis.get('reasoning') else ''
+                        print(f"    - ${amount:>10,.2f}  {desc[:50]}")
+                        if reasoning:
+                            print(f"      Reason: {reasoning}")
+                if len(approved_items) > 10:
+                    print(f"    ... and {len(approved_items) - 10} more")
+            
+            if ineligible_items:
+                print(f"  Ineligible Line Items ({len(ineligible_items)}):")
+                for item in ineligible_items[:10]:  # Show first 10
+                    if isinstance(item, dict):
+                        line_item = item.get('line_item', item)
+                        amount = line_item.get('amount', 0)
+                        desc = line_item.get('description', 'N/A')
+                        analysis = item.get('analysis', {})
+                        reasoning = analysis.get('reasoning', '')[:80] if analysis.get('reasoning') else ''
+                        # Get category tags if available
+                        categories = []
+                        if item.get('is_rent'):
+                            categories.append('RENT')
+                        if item.get('is_month_to_month'):
+                            categories.append('MONTH_TO_MONTH')
+                        if item.get('is_cleaning'):
+                            categories.append('CLEANING')
+                        if item.get('is_repair'):
+                            categories.append('REPAIR')
+                        if item.get('is_contractual_fee'):
+                            categories.append('CONTRACTUAL_FEE')
+                        if item.get('is_improper_notice'):
+                            categories.append('IMPROPER_NOTICE')
+                        if item.get('is_other_insurance'):
+                            categories.append('OTHER_INSURANCE')
+                        if item.get('is_normal_wear_tear'):
+                            categories.append('NORMAL_WEAR_TEAR')
+                        category_str = f" [{', '.join(categories)}]" if categories else ""
+                        print(f"    - ${amount:>10,.2f}  {desc[:50]}{category_str}")
+                        if reasoning:
+                            print(f"      Reason: {reasoning}")
+                if len(ineligible_items) > 10:
+                    print(f"    ... and {len(ineligible_items) - 10} more")
             
             if notes:
                 print(f"  Notes: {notes}")
