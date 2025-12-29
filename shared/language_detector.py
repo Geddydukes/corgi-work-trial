@@ -76,3 +76,16 @@ class LanguageDetector:
             return False
         return language_code.lower() in RTL_LANGUAGES
 
+
+
+
+
+
+
+
+
+
+
+
+
+

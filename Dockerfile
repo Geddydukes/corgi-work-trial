@@ -27,3 +27,4 @@ RUN mkdir -p /tmp/corgi_documents
 
 CMD ["python", "-m", "document_processor"]
 
+

@@ -132,3 +132,16 @@ class ErrorBudgetTracker:
         metrics = self.get_metrics()
         return metrics.budget_consumed >= 1.0
 
+
+
+
+
+
+
+
+
+
+
+
+
+

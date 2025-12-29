@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, BackgroundTasks
 from typing import Optional
 from uuid import uuid4
 from datetime import datetime
@@ -13,6 +13,7 @@ router = APIRouter()
 @router.post("/batch/evaluate", response_model=BatchEvaluationResponse, status_code=202)
 async def submit_batch_evaluation(
     request: BatchEvaluationRequest,
+    background_tasks: BackgroundTasks,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
     x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key"),
 ):
@@ -30,7 +31,8 @@ async def submit_batch_evaluation(
         result = await batch_service.submit_batch(
             claim_ids=request.claim_ids,
             webhook_url=request.webhook_url,
-            priority=request.priority
+            priority=request.priority,
+            background_tasks=background_tasks
         )
         
         return BatchEvaluationResponse(

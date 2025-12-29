@@ -12,8 +12,18 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import tempfile
 import os
+import threading
+import warnings
+
+# Suppress oauth2client file_cache warnings at module level
+# This warning occurs when using newer versions of oauth2client that don't support file_cache
+warnings.filterwarnings("ignore", message=".*file_cache.*")
+warnings.filterwarnings("ignore", message=".*oauth2client.*")
 
 logger = logging.getLogger(__name__)
+
+# Global lock for thread-safe service initialization
+_service_init_lock = threading.Lock()
 
 
 @dataclass
@@ -36,6 +46,9 @@ class GoogleDriveService:
     - OAuth authentication (for user-specific access)
     - Direct file streaming (no local download required)
     - Folder listing and file enumeration
+    
+    NOTE: Creating multiple instances concurrently can cause memory corruption.
+    Service initialization is thread-safe to prevent credential caching issues.
     """
     
     def __init__(self, credentials_path: Optional[str] = None, use_service_account: bool = True):
@@ -50,59 +63,89 @@ class GoogleDriveService:
         self.use_service_account = use_service_account
         self._service = None
         self._drive_service = None
+        self._lock = threading.Lock()  # Per-instance lock for thread-safe service access
     
     def _get_service(self):
-        """Get authenticated Google Drive service."""
+        """Get authenticated Google Drive service (thread-safe)."""
+        # Double-check locking pattern for thread safety
         if self._drive_service:
             return self._drive_service
         
-        try:
-            from google.oauth2 import service_account
-            from googleapiclient.discovery import build
-            from googleapiclient.errors import HttpError
-        except ImportError:
-            raise ImportError(
-                "Google API client not installed. Install with: "
-                "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
-            )
-        
-        if self.use_service_account:
-            if not self.credentials_path:
-                raise ValueError("Service account credentials path required")
+        # Use instance lock to prevent concurrent initialization
+        with self._lock:
+            # Check again after acquiring lock (double-check pattern)
+            if self._drive_service:
+                return self._drive_service
             
-            credentials = service_account.Credentials.from_service_account_file(
-                self.credentials_path,
-                scopes=['https://www.googleapis.com/auth/drive.readonly']
-            )
-        else:
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from google.auth.transport.requests import Request
-            import pickle
+            try:
+                from google.oauth2 import service_account
+                from googleapiclient.discovery import build
+                from googleapiclient.errors import HttpError
+            except ImportError:
+                raise ImportError(
+                    "Google API client not installed. Install with: "
+                    "pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
+                )
             
-            SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-            creds = None
-            
-            if os.path.exists('token.pickle'):
-                with open('token.pickle', 'rb') as token:
-                    creds = pickle.load(token)
-            
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    if not self.credentials_path:
-                        raise ValueError("OAuth credentials path required")
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self.credentials_path, SCOPES)
-                    creds = flow.run_local_server(port=0)
+            if self.use_service_account:
+                if not self.credentials_path:
+                    raise ValueError("Service account credentials path required")
                 
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
+                # Use global lock to prevent concurrent credential file access
+                with _service_init_lock:
+                    # Suppress oauth2client file_cache warnings that can cause issues
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message=".*file_cache.*")
+                        warnings.filterwarnings("ignore", message=".*oauth2client.*")
+                        
+                        credentials = service_account.Credentials.from_service_account_file(
+                            self.credentials_path,
+                            scopes=['https://www.googleapis.com/auth/drive.readonly']
+                        )
+            else:
+                from google_auth_oauthlib.flow import InstalledAppFlow
+                from google.auth.transport.requests import Request
+                import pickle
+                import warnings
+                
+                SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+                creds = None
+                
+                # Use global lock to prevent concurrent token file access
+                with _service_init_lock:
+                    # Suppress oauth2client file_cache warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message=".*file_cache.*")
+                        warnings.filterwarnings("ignore", message=".*oauth2client.*")
+                        
+                        if os.path.exists('token.pickle'):
+                            with open('token.pickle', 'rb') as token:
+                                creds = pickle.load(token)
+                        
+                        if not creds or not creds.valid:
+                            if creds and creds.expired and creds.refresh_token:
+                                creds.refresh(Request())
+                            else:
+                                if not self.credentials_path:
+                                    raise ValueError("OAuth credentials path required")
+                                flow = InstalledAppFlow.from_client_secrets_file(
+                                    self.credentials_path, SCOPES)
+                                creds = flow.run_local_server(port=0)
+                            
+                            with open('token.pickle', 'wb') as token:
+                                pickle.dump(creds, token)
+                
+                credentials = creds
             
-            credentials = creds
-        
-        self._drive_service = build('drive', 'v3', credentials=credentials)
-        return self._drive_service
+            # Build service outside the lock to avoid holding it during network calls
+            # Suppress warnings during service build as well
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*file_cache.*")
+                warnings.filterwarnings("ignore", message=".*oauth2client.*")
+                self._drive_service = build('drive', 'v3', credentials=credentials)
+            return self._drive_service
     
     def list_folder_files(
         self, 
@@ -198,13 +241,47 @@ class GoogleDriveService:
             file_stream = io.BytesIO()
             # Import here to avoid issues with module-level import
             from googleapiclient.http import MediaIoBaseDownload
-            downloader = MediaIoBaseDownload(file_stream, request)
+            import time as time_module
             
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                if status:
-                    logger.debug(f"Download progress: {int(status.progress() * 100)}%")
+            retry_count = 0
+            max_retries = 5  # Increased retries for SSL errors
+            retry_delay = 2  # Start with 2 seconds
+            
+            while retry_count < max_retries:
+                try:
+                    # Reset stream for each attempt
+                    file_stream.seek(0)
+                    file_stream.truncate(0)
+                    
+                    downloader = MediaIoBaseDownload(file_stream, request)
+                    done = False
+                    
+                    while not done:
+                        status, done = downloader.next_chunk()
+                        if status:
+                            logger.debug(f"Download progress: {int(status.progress() * 100)}%")
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except Exception as e:
+                    retry_count += 1
+                    error_str = str(e)
+                    is_ssl_error = 'SSL' in error_str or 'ssl' in error_str or 'SSLError' in error_str
+                    
+                    if retry_count >= max_retries:
+                        logger.error(f"Failed to download file {file_id} after {max_retries} retries: {e}")
+                        raise
+                    
+                    # Longer delay for SSL errors (they often indicate connection pool exhaustion)
+                    if is_ssl_error:
+                        delay = retry_delay * (retry_count ** 2)  # Quadratic backoff: 2s, 8s, 18s, 32s
+                        logger.warning(f"SSL error downloading file {file_id} (attempt {retry_count}/{max_retries}): {e}, retrying in {delay}s...")
+                    else:
+                        delay = retry_delay * retry_count  # Linear backoff for other errors
+                        logger.warning(f"Download error for file {file_id} (attempt {retry_count}/{max_retries}): {e}, retrying in {delay}s...")
+                    
+                    time_module.sleep(delay)
             
             file_stream.seek(0)
             return file_stream, filename, mime_type
@@ -248,7 +325,7 @@ class GoogleDriveService:
         filename: str
     ) -> Optional[DriveFile]:
         """
-        Find a file by name in a folder.
+        Find a file by name in a folder using a direct query (much faster than listing all files).
         
         Args:
             folder_id: Google Drive folder ID
@@ -257,10 +334,32 @@ class GoogleDriveService:
         Returns:
             DriveFile if found, None otherwise
         """
-        files = self.list_folder_files(folder_id)
-        for file in files:
-            if file.name == filename:
-                return file
+        service = self._get_service()
+        
+        # Use direct query to find file by name - much faster than listing all files
+        query = f"'{folder_id}' in parents and name='{filename}' and trashed=false"
+        
+        try:
+            results = service.files().list(
+                q=query,
+                pageSize=1,
+                fields="files(id, name, mimeType, size, modifiedTime, webViewLink)"
+            ).execute()
+            
+            items = results.get('files', [])
+            if items:
+                item = items[0]
+                return DriveFile(
+                    id=item['id'],
+                    name=item['name'],
+                    mime_type=item.get('mimeType', ''),
+                    size=int(item.get('size', 0)),
+                    modified_time=item.get('modifiedTime', ''),
+                    web_view_link=item.get('webViewLink')
+                )
+        except Exception as e:
+            logger.error(f"Error finding file by name '{filename}' in folder {folder_id}: {e}")
+        
         return None
     
     def extract_folder_id_from_url(self, url: str) -> str:

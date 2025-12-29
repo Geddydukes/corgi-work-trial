@@ -79,3 +79,4 @@ class TestPerformance:
                 if "tier1" in result.processing_metrics.tier_used.value:
                     assert elapsed < 1.0
 
+

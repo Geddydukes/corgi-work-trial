@@ -24,7 +24,13 @@ class BatchRepository(BaseRepository):
             return batch_id
         
         try:
-            with self.get_connection() as conn:
+            if not self.engine:
+                raise ValueError("Database engine not available")
+            # Use begin() for transactions that need to commit
+            with self.engine.begin() as conn:
+                # Set search_path
+                conn.execute(text("SET search_path TO claims, public"))
+                
                 for claim_id in claim_ids:
                     conn.execute(
                         text("""
@@ -41,7 +47,7 @@ class BatchRepository(BaseRepository):
                         }
                     )
                 
-                conn.commit()
+                # Transaction auto-commits when exiting the 'with' block
                 return batch_id
         except Exception as e:
             logger.error(f"Error creating batch job: {e}", exc_info=True)
@@ -125,7 +131,13 @@ class BatchRepository(BaseRepository):
             return False
         
         try:
-            with self.get_connection() as conn:
+            if not self.engine:
+                raise ValueError("Database engine not available")
+            # Use begin() for transactions that need to commit
+            with self.engine.begin() as conn:
+                # Set search_path
+                conn.execute(text("SET search_path TO claims, public"))
+                
                 update_data = {
                     'batch_id': batch_id,
                     'claim_id': claim_id,
@@ -153,7 +165,7 @@ class BatchRepository(BaseRepository):
                     
                     conn.execute(text(update_sql), update_data)
                 
-                conn.commit()
+                # Transaction auto-commits when exiting the 'with' block
                 return True
         except Exception as e:
             logger.error(f"Error updating batch status: {e}", exc_info=True)

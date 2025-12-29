@@ -12,6 +12,29 @@ from typing import Dict, List, Optional, Tuple, Any
 logger = logging.getLogger(__name__)
 
 
+def safe_json_load(value: Any, default: Any = None) -> Any:
+    """
+    Safely load JSON from a value that may be a string, already parsed, or None.
+    
+    Args:
+        value: Value that may be a JSON string, already parsed dict/list, or None
+        default: Default value to return if value is None or empty
+    
+    Returns:
+        Parsed JSON value or default
+    """
+    if value is None:
+        return default if default is not None else []
+    
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else []
+    
+    return value if value else (default if default is not None else [])
+
+
 def normalize_line_item(item: Any) -> Tuple[Dict, Dict]:
     """
     Normalize line item from various formats to standard format.
@@ -247,9 +270,9 @@ def build_decision_record_dict(
         "line_item_count": len(new_approved) + len(new_ineligible),
         "approved_line_items": new_approved,
         "ineligible_line_items": new_ineligible,
-        "flags": json.loads(updated_dict['flags']) if isinstance(updated_dict['flags'], str) else (updated_dict['flags'] if updated_dict['flags'] else {}),
-        "missing_data": json.loads(updated_dict['missing_data']) if isinstance(updated_dict['missing_data'], str) else (updated_dict['missing_data'] if updated_dict['missing_data'] else {}),
-        "reasoning": json.loads(updated_dict['reasoning']) if isinstance(updated_dict['reasoning'], str) else (updated_dict['reasoning'] if updated_dict['reasoning'] else {}),
+        "flags": safe_json_load(updated_dict['flags'], default={}),
+        "missing_data": safe_json_load(updated_dict['missing_data'], default={}),
+        "reasoning": safe_json_load(updated_dict['reasoning'], default={}),
         "confidence_score": float(updated_dict['confidence_score']) if updated_dict['confidence_score'] else 0.0,
         "engine_version": updated_dict['engine_version'],
         "processing_time_ms": updated_dict['processing_time_ms'],

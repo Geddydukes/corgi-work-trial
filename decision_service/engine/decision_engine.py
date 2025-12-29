@@ -212,17 +212,24 @@ class DecisionEngine:
             approved_items = []
             ineligible_items = []
             
-            # Calculate eligible_total from line_items_with_flags (only count once!)
-            raw_eligible_total = sum(Decimal(str(item.get('amount', 0))) for item in line_items_with_flags if item.get('should_be_included', False))
+            # Calculate eligible_total from line_items_with_flags (sum amounts where should_be_included=True)
+            eligible_total = Decimal("0")
+            approved_count = 0
+            for item in line_items_with_flags:
+                if item.get('should_be_included', False):
+                    amount = Decimal(str(item.get('amount', 0)))
+                    eligible_total += amount
+                    approved_count += 1
             
             # Sanity check: eligible_total should not exceed invoice_total by more than 50%
             # This catches data corruption (e.g., Claim 901 with billions)
-            if raw_eligible_total > invoice_total * Decimal("1.5") and invoice_total > 0:
-                logger.warning(f"Eligible total ${raw_eligible_total} exceeds invoice_total ${invoice_total} by >50%, applying sanity cap")
+            if eligible_total > invoice_total * Decimal("1.5") and invoice_total > 0:
+                logger.warning(f"Eligible total ${eligible_total} exceeds invoice_total ${invoice_total} by >50%, applying sanity cap")
                 eligible_total = invoice_total * Decimal("1.5")
                 invoice_data["flags"]["warnings"].append(f"eligible_total_sanity_check_applied: capped to ${eligible_total}")
-            else:
-                eligible_total = raw_eligible_total
+            
+            # Log summary for debugging - this will help diagnose the $0 issue
+            logger.info(f"Claim {claim_id}: {approved_count} approved items with eligible_total=${eligible_total}, invoice_total=${invoice_total}")
             
             for item in line_items_with_flags:
                 amount = Decimal(str(item.get('amount', 0)))

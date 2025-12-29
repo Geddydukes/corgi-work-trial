@@ -47,6 +47,7 @@ variance_report_*.txt
 # Environment files
 .env.local
 .env.*.local
+env.backup.*
 
 # Google Drive credentials
 google-drive-credentials.json

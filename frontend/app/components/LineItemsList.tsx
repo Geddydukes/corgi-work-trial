@@ -54,7 +54,7 @@ export default function LineItemsList({
         </div>
         <div className="text-right">
           <p className="text-sm text-gray-500">Total Approved</p>
-          <p className="text-2xl font-bold text-blue-600">${liveTotal.toFixed(2)}</p>
+          <p className="text-2xl font-bold text-blue-600">${(liveTotal ?? 0).toFixed(2)}</p>
         </div>
       </div>
 
@@ -181,7 +181,7 @@ export default function LineItemsList({
             <div className="mt-4 pt-4 border-t border-gray-200">
               <div className="flex justify-between items-center">
                 <p className="text-sm font-medium text-gray-700">Total Approved Amount:</p>
-                <p className="text-xl font-bold text-blue-600">${liveTotal.toFixed(2)}</p>
+                <p className="text-xl font-bold text-blue-600">${(liveTotal ?? 0).toFixed(2)}</p>
               </div>
             </div>
           </div>

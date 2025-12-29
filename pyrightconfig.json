@@ -1,0 +1,14 @@
+{
+  "venvPath": "/Users/geddydukes/Desktop/Corgi",
+  "venv": "env",
+  "extraPaths": [
+    "/Users/geddydukes/Desktop/Corgi"
+  ],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.8"
+}
+
+
+
+
+

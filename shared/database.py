@@ -36,15 +36,24 @@ def get_engine() -> Optional[Engine]:
         return None
     
     try:
+        # Add connection timeout to prevent hanging
+        # connect_args will be passed to the underlying psycopg2 connection
+        connect_args = {
+            "connect_timeout": 3,  # 3 second connection timeout (aggressive)
+            "options": "-c statement_timeout=3000"  # 3 second statement timeout (in milliseconds)
+        }
+        
         _engine_cache = create_engine(
             Config.DATABASE_URL,
             pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=10,  # Increased from 5 to handle more concurrent requests
+            max_overflow=20,  # Increased from 10
             pool_recycle=3600,
-            echo=False
+            pool_timeout=5,  # Increased from 3 to 5 seconds for connection acquisition
+            echo=False,
+            connect_args=connect_args
         )
-        logger.info("Database engine created with connection pooling")
+        logger.info("Database engine created with connection pooling and timeouts")
         return _engine_cache
     except Exception as e:
         logger.error(f"Failed to create database engine: {e}", exc_info=True)

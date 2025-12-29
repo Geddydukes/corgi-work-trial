@@ -185,3 +185,16 @@ class TableDetector:
         
         return ' '.join(merged), current_idx
 
+
+
+
+
+
+
+
+
+
+
+
+
+

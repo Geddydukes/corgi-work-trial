@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { getDecision, updateDecision, processFromDrive, DecisionResponse, LineItem, LineItemOverride, ProcessFromDriveRequest } from '@/lib/api';
 import LineItemsList from './LineItemsList';
 import DecisionSummary from './DecisionSummary';
+import BatchProcessor from './BatchProcessor';
 
 export default function DecisionViewer() {
   const [trackingNumber, setTrackingNumber] = useState('');
@@ -20,9 +21,17 @@ export default function DecisionViewer() {
   // Default Google Drive folder ID
   const DEFAULT_DRIVE_FOLDER_ID = '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
 
+  const hasCommas = useMemo(() => {
+    return trackingNumber.includes(',');
+  }, [trackingNumber]);
+
   const handleSearch = async () => {
     if (!trackingNumber.trim()) {
       setError('Please enter a tracking number');
+      return;
+    }
+
+    if (hasCommas) {
       return;
     }
 
@@ -38,7 +47,11 @@ export default function DecisionViewer() {
     let processedFromDrive = false;
 
     try {
+      console.log(`[DecisionViewer] Fetching decision for: ${trackingNumber.trim()}`);
+      const startTime = Date.now();
       const result = await getDecision(trackingNumber.trim());
+      const duration = Date.now() - startTime;
+      console.log(`[DecisionViewer] Decision fetched in ${duration}ms:`, result);
       setLoadingMessage('');
       setDecision(result);
       
@@ -52,7 +65,56 @@ export default function DecisionViewer() {
       });
       setLineItemStates(states);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch decision';
+      // Safely extract error message, handling objects and arrays
+      let errorMessage = 'Failed to fetch decision';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (Array.isArray(err)) {
+        // Handle array of errors
+        errorMessage = err.map(e => {
+          if (typeof e === 'string') return e;
+          if (e instanceof Error) return e.message;
+          if (e && typeof e === 'object' && 'message' in e) return String(e.message);
+          if (e && typeof e === 'object' && 'detail' in e) return String(e.detail);
+          return JSON.stringify(e);
+        }).join(', ');
+      } else if (err && typeof err === 'object') {
+        // Handle error objects - try to extract message or stringify safely
+        if ('message' in err && typeof err.message === 'string') {
+          errorMessage = err.message;
+        } else if ('detail' in err && typeof err.detail === 'string') {
+          errorMessage = err.detail;
+        } else {
+          try {
+            errorMessage = JSON.stringify(err, null, 2);
+          } catch {
+            errorMessage = String(err);
+          }
+        }
+      }
+      
+      console.error(`[DecisionViewer] Error fetching decision:`, err);
+      
+      // Handle timeout errors
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        setLoadingMessage('');
+        setError('Request timed out. The server took too long to respond. Please try again.');
+        setDecision(null);
+        setLoading(false);
+        return;
+      }
+      
+      // Handle connection errors
+      if (errorMessage.includes('Cannot connect') || errorMessage.includes('Failed to fetch')) {
+        setLoadingMessage('');
+        setError('Cannot connect to the server. Please make sure the backend is running on http://localhost:8000');
+        setDecision(null);
+        setLoading(false);
+        return;
+      }
+      
       // If claim not found, automatically process from Google Drive
       if (errorMessage.includes('No decision found') || errorMessage.includes('404')) {
         setError(null);
@@ -245,7 +307,7 @@ export default function DecisionViewer() {
     }
   };
 
-  const calculateLiveTotal = (): number => {
+  const liveTotal = useMemo(() => {
     if (!decision) return 0;
 
     let total = 0;
@@ -269,11 +331,13 @@ export default function DecisionViewer() {
     }
 
     return total;
-  };
+  }, [decision, lineItemStates, capEnabled, overrideCapAmount]);
 
-  const hasChanges = Array.from(lineItemStates.values()).some(state => state.changed) ||
-    !capEnabled || overrideCapAmount !== undefined ||
-    (overrideStatus !== undefined && overrideStatus !== decision?.proposed_status);
+  const hasChanges = useMemo(() => {
+    return Array.from(lineItemStates.values()).some(state => state.changed) ||
+      !capEnabled || overrideCapAmount !== undefined ||
+      (overrideStatus !== undefined && overrideStatus !== decision?.proposed_status);
+  }, [lineItemStates, capEnabled, overrideCapAmount, overrideStatus, decision]);
 
   return (
     <div className="space-y-6">
@@ -288,15 +352,20 @@ export default function DecisionViewer() {
             type="text"
             value={trackingNumber}
             onChange={(e) => setTrackingNumber(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Enter claim tracking number (e.g., 901)"
+            onKeyDown={(e) => e.key === 'Enter' && !hasCommas && handleSearch()}
+            placeholder="Enter tracking number (e.g., 901) or comma-separated list (e.g., 901, 555, 603)"
             className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
           />
+          {hasCommas && (
+            <p className="mt-2 text-sm text-blue-600">
+              Batch processing will be used for multiple tracking numbers.
+            </p>
+          )}
         </div>
         <div className="flex items-end">
           <button
             onClick={handleSearch}
-            disabled={loading}
+            disabled={loading || hasCommas}
             className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {loading ? (
@@ -310,6 +379,15 @@ export default function DecisionViewer() {
           </button>
         </div>
       </div>
+
+      {hasCommas && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800 mb-4">
+            <strong>Batch mode detected:</strong> Comma-separated input detected. Batch processing will be used.
+          </p>
+          <BatchProcessor initialInput={trackingNumber} />
+        </div>
+      )}
 
       {/* Loading Animation */}
       {loading && (
@@ -351,7 +429,7 @@ export default function DecisionViewer() {
         <div className="space-y-6">
           <DecisionSummary 
             decision={decision} 
-            liveTotal={calculateLiveTotal()}
+            liveTotal={liveTotal}
             hasChanges={hasChanges}
             capEnabled={capEnabled}
             overrideCapAmount={overrideCapAmount}
@@ -366,7 +444,7 @@ export default function DecisionViewer() {
             lineItemStates={lineItemStates}
             onToggle={handleToggleLineItem}
             onNoteChange={handleNoteChange}
-            liveTotal={calculateLiveTotal()}
+            liveTotal={liveTotal}
           />
 
           {hasChanges && (

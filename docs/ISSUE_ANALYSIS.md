@@ -181,3 +181,16 @@
 4. **What's the threshold for normal wear/tear?** (When should we deny vs approve?)
 5. **Should reletting fees and future rent be approved?** (My answer: No - these are contractual, not damages)
 
+
+
+
+
+
+
+
+
+
+
+
+
+

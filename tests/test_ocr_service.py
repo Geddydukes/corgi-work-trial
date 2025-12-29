@@ -65,3 +65,4 @@ class TestOCRService:
             if best:
                 assert best.confidence >= 0
 
+

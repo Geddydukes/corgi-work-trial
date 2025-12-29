@@ -61,3 +61,4 @@ class TestDocumentClassifier:
         
         assert result.document_type in [DocumentType.UNKNOWN, DocumentType.LEASE, DocumentType.INVOICE]
 
+

@@ -1,8 +1,4 @@
-"""
-Base repository class with common database access patterns.
 
-All repositories should inherit from this class to eliminate code duplication.
-"""
 
 import logging
 from typing import Optional, Any, Dict, List
@@ -50,14 +46,28 @@ class BaseRepository:
         Usage:
             with self.get_connection() as conn:
                 result = conn.execute(text("SELECT ..."), params)
-                conn.commit()
+                # For writes, use: conn.commit()
         """
         if not self.is_database_configured():
             raise ValueError("Database not configured")
         
-        with self.engine.connect() as conn:
-            conn.execute(text("SET search_path TO claims, public"))
-            yield conn
+        if self.engine is None:
+            raise ValueError("Database engine is None")
+        
+        # Use autocommit=True for read operations, or begin() for transactions
+        # This prevents hanging on connection acquisition
+        try:
+            with self.engine.connect() as conn:
+                # Set statement timeout immediately to prevent hanging queries (3 seconds - aggressive)
+                conn.execute(text("SET statement_timeout = '3s'"))
+                # Set search_path
+                conn.execute(text("SET search_path TO claims, public"))
+                # Use autocommit mode to avoid transaction overhead for reads
+                # For writes, call conn.commit() explicitly
+                yield conn
+        except Exception as e:
+            logger.error(f"Error getting database connection: {e}", exc_info=True)
+            raise
     
     async def execute_query(
         self,

@@ -465,3 +465,4 @@ def downgrade():
     # Drop UTC function
     op.execute("DROP FUNCTION IF EXISTS utc_now() CASCADE")
 
+

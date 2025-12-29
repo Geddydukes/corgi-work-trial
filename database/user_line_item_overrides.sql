@@ -57,3 +57,4 @@ COMMENT ON COLUMN claims.user_line_item_overrides.batch_id IS
 COMMENT ON COLUMN claims.user_line_item_overrides.is_applied_to_rules IS 
     'True if this override has been processed and used to improve deterministic rules';
 
+

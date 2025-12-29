@@ -48,3 +48,4 @@ DROP SCHEMA IF EXISTS claims CASCADE;
 -- Reset search path
 RESET search_path;
 
+

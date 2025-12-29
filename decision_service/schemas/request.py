@@ -15,8 +15,7 @@ class BatchEvaluationRequest(BaseModel):
     claim_ids: List[int] = Field(
         ...,
         min_items=1,
-        max_items=1000,
-        description="List of claim IDs to evaluate"
+        description="List of claim IDs to evaluate (unlimited size, ranges will be expanded)"
     )
     webhook_url: Optional[str] = Field(
         None,

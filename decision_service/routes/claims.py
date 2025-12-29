@@ -6,6 +6,7 @@ import asyncio
 import json
 import tempfile
 import hashlib
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -19,8 +20,10 @@ from decision_service.routes.claim_helpers import (
     process_line_item_overrides,
     calculate_cap_amount,
     determine_new_status,
-    build_decision_record_dict
+    build_decision_record_dict,
+    safe_json_load
 )
+from decision_service.routes.error_handling import handle_route_errors
 from decision_service.engine.decision_engine import DecisionEngine
 from decision_service.repositories.claim_repository import ClaimRepository
 from decision_service.repositories.override_repository import OverrideRepository
@@ -33,6 +36,7 @@ router = APIRouter()
 
 
 @router.post("/claims/{tracking_number}/decision", response_model=DecisionResponse)
+@handle_route_errors
 async def create_decision(
     tracking_number: str,
     request: Optional[DecisionRequest] = None,
@@ -49,30 +53,25 @@ async def create_decision(
     
     request_id = x_request_id or str(uuid4())
     
-    try:
-        engine = DecisionEngine()
-        repository = ClaimRepository()
-        
-        claim = await repository.get_claim_by_tracking_number(tracking_number)
-        if not claim:
-            raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")
-        
-        decision = await engine.evaluate_claim(
-            claim_id=claim["id"],
-            override_max_benefit=request.override_max_benefit if request else None
-        )
-        
-        decision_record = await repository.create_decision(decision, user_id="system")
-        
-        return DecisionResponse.from_decision_record(decision_record)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    engine = DecisionEngine()
+    repository = ClaimRepository()
+    
+    claim = await repository.get_claim_by_tracking_number(tracking_number)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")
+    
+    decision = await engine.evaluate_claim(
+        claim_id=claim["id"],
+        override_max_benefit=request.override_max_benefit if request else None
+    )
+    
+    decision_record = await repository.create_decision(decision, user_id="system")
+    
+    return DecisionResponse.from_decision_record(decision_record)
 
 
 @router.get("/claims/{tracking_number}/decision", response_model=DecisionResponse)
+@handle_route_errors
 async def get_decision(
     tracking_number: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
@@ -84,27 +83,37 @@ async def get_decision(
     Use POST to create a new decision.
     """
     request_id = x_request_id or str(uuid4())
+    logger.info(f"Getting decision for tracking number: {tracking_number}")
     
+    repository = ClaimRepository()
     try:
-        repository = ClaimRepository()
         decision_record = await repository.get_latest_decision_by_tracking_number(tracking_number)
-        
-        if not decision_record:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No decision found for claim with tracking number {tracking_number}. Use POST to create a new decision."
-            )
-        
-        return DecisionResponse.from_decision_record(decision_record)
-        
-    except HTTPException:
-        raise
+    except TimeoutError as e:
+        logger.error(f"Database query timed out for tracking number: {tracking_number} - {e}")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Database query timed out after 10 seconds. The server took too long to respond. Please try again or check if the database is accessible."
+        )
     except Exception as e:
-        logger.error(f"Internal server error during decision retrieval: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        logger.error(f"Unexpected error getting decision: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error while fetching decision: {str(e)}"
+        )
+    
+    if not decision_record:
+        logger.info(f"No decision found for tracking number: {tracking_number}")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No decision found for claim with tracking number {tracking_number}. Use POST to create a new decision."
+        )
+    
+    logger.info(f"Found decision {decision_record.get('id')} for tracking number: {tracking_number}")
+    return DecisionResponse.from_decision_record(decision_record)
 
 
 @router.get("/claims/{tracking_number}/documents")
+@handle_route_errors
 async def get_claim_documents(
     tracking_number: str,
     document_type: Optional[DocumentType] = Query(None, description="Filter by document type")
@@ -115,8 +124,6 @@ async def get_claim_documents(
     Returns metadata for all documents associated with a claim.
     Optionally filter by document type.
     """
-    from decision_service.repositories.document_repository import DocumentRepository
-    
     repository = DocumentRepository()
     documents = await repository.get_documents_by_tracking_number(
         tracking_number,
@@ -130,6 +137,7 @@ async def get_claim_documents(
 
 
 @router.patch("/claims/{tracking_number}/decision/{decision_id}", response_model=DecisionResponse)
+@handle_route_errors
 async def update_decision(
     tracking_number: str,
     decision_id: int,
@@ -142,22 +150,20 @@ async def update_decision(
     Updates line item approvals based on user input and stores overrides for rule refinement.
     """
     request_id = x_request_id or str(uuid4())
+    claim_repo = ClaimRepository()
+    override_repo = OverrideRepository()
     
-    try:
-        claim_repo = ClaimRepository()
-        override_repo = OverrideRepository()
-        
-        claim = await claim_repo.get_claim_by_tracking_number(tracking_number)
-        if not claim:
-            raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")
-        
-        if not Config.DATABASE_URL:
-            raise HTTPException(status_code=500, detail="Database not configured")
-        
-        engine = get_engine()
-        if not engine:
-            raise HTTPException(status_code=500, detail="Database engine not available")
-        with engine.connect() as conn:
+    claim = await claim_repo.get_claim_by_tracking_number(tracking_number)
+    if not claim:
+        raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")
+    
+    if not Config.DATABASE_URL:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    
+    engine = get_engine()
+    if not engine:
+        raise HTTPException(status_code=500, detail="Database engine not available")
+    with engine.connect() as conn:
             conn.execute(text("SET search_path TO claims, public"))
             
             decision_result = conn.execute(
@@ -183,21 +189,18 @@ async def update_decision(
                             'decided_at']
             decision_dict = {col: decision_result[i] for i, col in enumerate(decision_cols)}
             
-            all_approved = json.loads(decision_dict['approved_line_items']) if isinstance(decision_dict['approved_line_items'], str) else (decision_dict['approved_line_items'] if decision_dict['approved_line_items'] else [])
-            all_ineligible = json.loads(decision_dict['ineligible_line_items']) if isinstance(decision_dict['ineligible_line_items'], str) else (decision_dict['ineligible_line_items'] if decision_dict['ineligible_line_items'] else [])
+            all_approved = safe_json_load(decision_dict['approved_line_items'], default=[])
+            all_ineligible = safe_json_load(decision_dict['ineligible_line_items'], default=[])
             
             all_items = []
-            item_index_map = {}
             current_index = 0
             
             for item in all_approved:
                 all_items.append({**item, '_original_included': True, '_index': current_index})
-                item_index_map[current_index] = item
                 current_index += 1
             
             for item in all_ineligible:
                 all_items.append({**item, '_original_included': False, '_index': current_index})
-                item_index_map[current_index] = item
                 current_index += 1
             
             override_map = {}
@@ -311,15 +314,10 @@ async def update_decision(
             )
             
             return DecisionResponse.from_decision_record(decision_record)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Internal server error during decision update: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.post("/claims/process-from-drive", response_model=DecisionResponse)
+@handle_route_errors
 async def process_claim_from_drive(
     request: ProcessFromDriveRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
@@ -336,202 +334,293 @@ async def process_claim_from_drive(
     
     Use this for claims that aren't already in the database.
     """
+    start_time = time.time()
     request_id = x_request_id or str(uuid4())
+    logger.info(f"[{request_id}] Starting process-from-drive for tracking_number={request.tracking_number}")
     
-    try:
-        claim_repo = ClaimRepository()
-        claim = await claim_repo.get_claim_by_tracking_number(request.tracking_number)
-        
-        if not claim:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Claim with tracking number {request.tracking_number} not found in database. Please create the claim first."
-            )
-        
-        logger.info(f"Using existing claim {request.tracking_number} (ID: {claim['id']})")
-        
-        credentials_path = Config.GOOGLE_DRIVE_CREDENTIALS or "google-drive-credentials.json"
-        if not Path(credentials_path).exists():
-            raise HTTPException(
-                status_code=500,
-                detail=f"Google Drive credentials not found at {credentials_path}. Please set GOOGLE_DRIVE_CREDENTIALS env var or place credentials at google-drive-credentials.json"
-            )
-        
-        drive_service = GoogleDriveService(
-            credentials_path=credentials_path,
-            use_service_account=Config.GOOGLE_DRIVE_USE_SERVICE_ACCOUNT
+    step_start = time.time()
+    claim_repo = ClaimRepository()
+    claim = await claim_repo.get_claim_by_tracking_number(request.tracking_number)
+    logger.info(f"[{request_id}] Claim lookup took {time.time() - step_start:.2f}s")
+    
+    if not claim:
+        logger.info(f"[{request_id}] Claim {request.tracking_number} not found in database, creating new claim...")
+        step_start = time.time()
+        # Create a new claim with minimal information - we'll get more details from Google Drive
+        # Use default values that can be updated later
+        claim = await claim_repo.create_or_get_claim(
+            tracking_number=request.tracking_number,
+            claim_amount=0.0,  # Will be updated from documents
+            max_benefit=None,  # Will be calculated
+            claim_date="2024-01-01",  # Default, will be updated from documents
+            policyholder_id=None,
+            property_id=None,
+            lease_start_date=None,
+            lease_end_date=None,
+            move_out_date=None,
+            security_deposit_amount=None
         )
-        
-        folder_id = drive_service.extract_folder_id_from_url(request.drive_folder_id)
-        
-        logger.info(f"Checking Google Drive folder {folder_id}")
-        drive_files = drive_service.list_folder_files(
-            folder_id=folder_id,
-            file_types=['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/tiff'],
-            recursive=False
+        logger.info(f"[{request_id}] Created new claim {request.tracking_number} (ID: {claim['id']}) in {time.time() - step_start:.2f}s")
+    else:
+        logger.info(f"[{request_id}] Using existing claim {request.tracking_number} (ID: {claim['id']})")
+    
+    step_start = time.time()
+    credentials_path = Config.GOOGLE_DRIVE_CREDENTIALS or "google-drive-credentials.json"
+    credentials_path_obj = Path(credentials_path)
+    if not credentials_path_obj.is_absolute():
+        project_root = Path(__file__).parent.parent.parent
+        credentials_path_obj = project_root / credentials_path
+    
+    if not credentials_path_obj.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Google Drive credentials not found at {credentials_path_obj}. Please set GOOGLE_DRIVE_CREDENTIALS env var or place credentials at google-drive-credentials.json"
         )
+    
+    credentials_path = str(credentials_path_obj)
+    logger.info(f"[{request_id}] Credentials path setup took {time.time() - step_start:.2f}s")
+    
+    step_start = time.time()
+    drive_service = GoogleDriveService(
+        credentials_path=credentials_path,
+        use_service_account=Config.GOOGLE_DRIVE_USE_SERVICE_ACCOUNT
+    )
+    logger.info(f"[{request_id}] GoogleDriveService initialization took {time.time() - step_start:.2f}s")
+    
+    step_start = time.time()
+    folder_id = drive_service.extract_folder_id_from_url(request.drive_folder_id)
+    logger.info(f"[{request_id}] Extracted folder_id={folder_id} in {time.time() - step_start:.2f}s")
+    
+    step_start = time.time()
+    logger.info(f"[{request_id}] Listing files in Google Drive folder {folder_id}...")
+    drive_files = drive_service.list_folder_files(
+        folder_id=folder_id,
+        file_types=['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/tiff'],
+        recursive=False
+    )
+    logger.info(f"[{request_id}] list_folder_files took {time.time() - step_start:.2f}s, found {len(drive_files) if drive_files else 0} files")
+    
+    if not drive_files:
+        step_start = time.time()
+        logger.info(f"[{request_id}] No files found in root folder, looking for subfolder '{request.tracking_number}'...")
+        subfolder = drive_service.get_file_by_name(folder_id, request.tracking_number)
+        logger.info(f"[{request_id}] get_file_by_name took {time.time() - step_start:.2f}s")
         
-        if not drive_files:
-            logger.info(f"No files found in root folder, looking for subfolder '{request.tracking_number}'...")
-            subfolder = drive_service.get_file_by_name(folder_id, request.tracking_number)
-            
-            if subfolder and 'folder' in subfolder.mime_type:
-                logger.info(f"Found subfolder '{request.tracking_number}' with ID {subfolder.id}")
-                folder_id = subfolder.id
-                drive_files = drive_service.list_folder_files(
-                    folder_id=folder_id,
-                    file_types=['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/tiff'],
-                    recursive=False
+        if subfolder and 'folder' in subfolder.mime_type:
+            logger.info(f"[{request_id}] Found subfolder '{request.tracking_number}' with ID {subfolder.id}")
+            folder_id = subfolder.id
+            step_start = time.time()
+            drive_files = drive_service.list_folder_files(
+                folder_id=folder_id,
+                file_types=['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/tiff'],
+                recursive=False
+            )
+            logger.info(f"[{request_id}] list_folder_files (subfolder) took {time.time() - step_start:.2f}s, found {len(drive_files) if drive_files else 0} files")
+        else:
+            all_items = drive_service.list_folder_files(folder_id, recursive=False)
+            folders = [item for item in all_items if 'folder' in item.mime_type]
+            if folders:
+                folder_names = [f.name for f in folders[:10]]
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No documents found in folder {folder_id} and no subfolder named '{request.tracking_number}' found. Available subfolders: {', '.join(folder_names)}"
                 )
             else:
-                all_items = drive_service.list_folder_files(folder_id, recursive=False)
-                folders = [item for item in all_items if 'folder' in item.mime_type]
-                if folders:
-                    folder_names = [f.name for f in folders[:10]]
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"No documents found in folder {folder_id} and no subfolder named '{request.tracking_number}' found. Available subfolders: {', '.join(folder_names)}"
-                    )
-                else:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"No documents found in Google Drive folder {folder_id}"
-                    )
-        
-        if not drive_files:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No documents found in Google Drive folder {folder_id}"
-            )
-        
-        logger.info(f"Found {len(drive_files)} files in Google Drive folder")
-        
-        doc_processor = DocumentProcessor()
-        engine = get_engine()
-        if not engine:
-            raise HTTPException(status_code=500, detail="Database engine not available")
-        
-        async def process_single_document(drive_file):
-            """Process a single document from Google Drive."""
-            try:
-                logger.info(f"Downloading: {drive_file.name}")
-                
-                loop = asyncio.get_event_loop()
-                file_stream, filename, mime_type = await loop.run_in_executor(
-                    None,
-                    drive_service.download_file_to_stream,
-                    drive_file.id
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No documents found in Google Drive folder {folder_id}"
                 )
-                
-                file_content = file_stream.read()
-                file_hash = hashlib.sha256(file_content).hexdigest()
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
-                    tmp_file.write(file_content)
-                    tmp_path = Path(tmp_file.name)
-                
-                logger.info(f"Processing: {filename}")
-                
-                result = await doc_processor.process_document(
-                    file_path=tmp_path,
-                    claim_id=claim['id'],
-                    processing_priority=0,
-                    force_high_quality=False
-                )
-                
-                tmp_path.unlink()
-                
-                if result.errors:
-                    error_messages = [e.message for e in result.errors]
-                    logger.error(f"Error processing {filename}: {', '.join(error_messages)}")
-                    return None
-                
-                with engine.connect() as conn:
-                    conn.execute(text("SET search_path TO claims, public"))
-                    
-                    conn.execute(
-                        text("""
-                            INSERT INTO claim_documents (
-                                claim_id, file_path, original_filename, file_hash,
-                                file_size_bytes, mime_type, document_type,
-                                classification_confidence, extracted_text, ocr_confidence,
-                                page_count, processing_status, processed_at
-                            ) VALUES (
-                                :claim_id, :file_path, :filename, :file_hash,
-                                :size, :mime_type, CAST(:doc_type AS document_type_enum),
-                                :class_conf, :text, :ocr_conf,
-                                :pages, 'completed', NOW()
-                            )
-                            ON CONFLICT (claim_id, file_hash) DO UPDATE SET
-                                extracted_text = EXCLUDED.extracted_text,
-                                document_type = EXCLUDED.document_type,
-                                classification_confidence = EXCLUDED.classification_confidence,
-                                ocr_confidence = EXCLUDED.ocr_confidence,
-                                page_count = EXCLUDED.page_count,
-                                processing_status = 'completed',
-                                processed_at = NOW()
-                        """),
-                        {
-                            'claim_id': claim['id'],
-                            'file_path': f"drive://{drive_file.id}",
-                            'filename': filename,
-                            'file_hash': file_hash,
-                            'size': drive_file.size,
-                            'mime_type': mime_type,
-                            'doc_type': result.classification.document_type.value,
-                            'class_conf': result.classification.confidence,
-                            'text': result.best_extraction.text,
-                            'ocr_conf': result.quality_metrics.avg_ocr_confidence,
-                            'pages': result.processing_metrics.pages_processed,
-                        }
-                    )
-                    conn.commit()
-                
-                logger.info(f"✓ Processed: {result.classification.document_type.value} (confidence: {result.classification.confidence:.1f}%)")
-                return True
-                
-            except Exception as e:
-                logger.error(f"Error processing document {drive_file.name}: {e}", exc_info=True)
-                return None
-        
-        logger.info(f"Processing {len(drive_files)} documents in parallel (max 3 concurrent)...")
-        semaphore = asyncio.Semaphore(3)
-        
-        async def process_with_semaphore(drive_file):
-            async with semaphore:
-                return await process_single_document(drive_file)
-        
-        results = await asyncio.gather(*[process_with_semaphore(f) for f in drive_files], return_exceptions=True)
-        processed_count = sum(1 for r in results if r is True)
-        
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Exception processing {drive_files[i].name}: {result}", exc_info=result)
-        
-        if processed_count == 0:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to process any documents from Google Drive"
-            )
-        
-        logger.info(f"Processed {processed_count}/{len(drive_files)} documents")
-        
-        logger.info("Running decision engine...")
-        decision_engine = DecisionEngine()
-        decision = await decision_engine.evaluate_claim(
-            claim_id=claim['id'],
-            override_max_benefit=request.override_max_benefit
+    
+    if not drive_files:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No documents found in Google Drive folder {folder_id}"
         )
-        
-        decision_record = await claim_repo.create_decision(decision, user_id="system")
-        
-        logger.info(f"✓ Decision created: {decision.proposed_status} ${decision.proposed_benefit_amount}")
-        
-        return DecisionResponse.from_decision_record(decision_record)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing claim from Google Drive: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+    logger.info(f"[{request_id}] Found {len(drive_files)} files in Google Drive folder")
+    
+    step_start = time.time()
+    doc_processor = DocumentProcessor()
+    engine = get_engine()
+    if not engine:
+        raise HTTPException(status_code=500, detail="Database engine not available")
+    logger.info(f"[{request_id}] DocumentProcessor and engine setup took {time.time() - step_start:.2f}s")
+    
+    async def process_single_document(drive_file):
+        """Process a single document from Google Drive."""
+        doc_start = time.time()
+        doc_id = f"{request_id}-{drive_file.id}"
+        try:
+            logger.info(f"[{doc_id}] Starting download: {drive_file.name}")
+            download_start = time.time()
+            
+            loop = asyncio.get_event_loop()
+            file_stream, filename, mime_type = await loop.run_in_executor(
+                None,
+                drive_service.download_file_to_stream,
+                drive_file.id
+            )
+            logger.info(f"[{doc_id}] Download took {time.time() - download_start:.2f}s")
+            
+            hash_start = time.time()
+            file_content = file_stream.read()
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            logger.info(f"[{doc_id}] File hash calculation took {time.time() - hash_start:.2f}s")
+            
+            write_start = time.time()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
+                tmp_file.write(file_content)
+                tmp_path = Path(tmp_file.name)
+            logger.info(f"[{doc_id}] Temp file write took {time.time() - write_start:.2f}s")
+            
+            process_start = time.time()
+            logger.info(f"[{doc_id}] Processing document: {filename}")
+            
+            result = await doc_processor.process_document(
+                file_path=tmp_path,
+                claim_id=claim['id'],
+                processing_priority=0,
+                force_high_quality=False
+            )
+            logger.info(f"[{doc_id}] Document processing took {time.time() - process_start:.2f}s")
+            
+            cleanup_start = time.time()
+            tmp_path.unlink()
+            logger.info(f"[{doc_id}] Cleanup took {time.time() - cleanup_start:.2f}s")
+            logger.info(f"[{doc_id}] Total document processing time: {time.time() - doc_start:.2f}s")
+            
+            if result.errors:
+                error_messages = [e.message for e in result.errors]
+                logger.error(f"Error processing {filename}: {', '.join(error_messages)}")
+                return None
+            
+            with engine.connect() as conn:
+                conn.execute(text("SET search_path TO claims, public"))
+                
+                conn.execute(
+                    text("""
+                        INSERT INTO claim_documents (
+                            claim_id, file_path, original_filename, file_hash,
+                            file_size_bytes, mime_type, document_type,
+                            classification_confidence, extracted_text, ocr_confidence,
+                            page_count, processing_status, processed_at
+                        ) VALUES (
+                            :claim_id, :file_path, :filename, :file_hash,
+                            :size, :mime_type, CAST(:doc_type AS document_type_enum),
+                            :class_conf, :text, :ocr_conf,
+                            :pages, 'completed', NOW()
+                        )
+                        ON CONFLICT (claim_id, file_hash) DO UPDATE SET
+                            extracted_text = EXCLUDED.extracted_text,
+                            document_type = EXCLUDED.document_type,
+                            classification_confidence = EXCLUDED.classification_confidence,
+                            ocr_confidence = EXCLUDED.ocr_confidence,
+                            page_count = EXCLUDED.page_count,
+                            processing_status = 'completed',
+                            processed_at = NOW()
+                    """),
+                    {
+                        'claim_id': claim['id'],
+                        'file_path': f"drive://{drive_file.id}",
+                        'filename': filename,
+                        'file_hash': file_hash,
+                        'size': drive_file.size,
+                        'mime_type': mime_type,
+                        'doc_type': result.classification.document_type.value,
+                        'class_conf': result.classification.confidence,
+                        'text': result.best_extraction.text,
+                        'ocr_conf': result.quality_metrics.avg_ocr_confidence,
+                        'pages': result.processing_metrics.pages_processed,
+                    }
+                )
+                conn.commit()
+            
+            logger.info(f"✓ Processed: {result.classification.document_type.value} (confidence: {result.classification.confidence:.1f}%)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing document {drive_file.name}: {e}", exc_info=True)
+            return None
+    
+    step_start = time.time()
+    # Reduced concurrency to 2 to avoid SSL connection pool exhaustion
+    # SSL errors occur when too many concurrent connections are made to Google Drive
+    logger.info(f"[{request_id}] Processing {len(drive_files)} documents in parallel (max 2 concurrent)...")
+    semaphore = asyncio.Semaphore(2)
+    
+    async def process_with_semaphore(drive_file):
+        async with semaphore:
+            logger.info(f"[{request_id}] Starting parallel processing of: {drive_file.name}")
+            return await process_single_document(drive_file)
+    
+    # Process all documents in parallel with semaphore limiting concurrency
+    logger.info(f"[{request_id}] Launching {len(drive_files)} parallel document processing tasks...")
+    results = await asyncio.gather(*[process_with_semaphore(f) for f in drive_files], return_exceptions=True)
+    processed_count = sum(1 for r in results if r is True)
+    
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"Exception processing {drive_files[i].name}: {result}", exc_info=result)
+    
+    if processed_count == 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process any documents from Google Drive"
+        )
+    
+    logger.info(f"[{request_id}] Processed {processed_count}/{len(drive_files)} documents")
+    logger.info(f"[{request_id}] Document processing phase took {time.time() - step_start:.2f}s")
+    
+    step_start = time.time()
+    logger.info(f"[{request_id}] Running decision engine...")
+    decision_engine = DecisionEngine()
+    decision = await decision_engine.evaluate_claim(
+        claim_id=claim['id'],
+        override_max_benefit=request.override_max_benefit
+    )
+    logger.info(f"[{request_id}] Decision engine evaluation took {time.time() - step_start:.2f}s")
+    
+    step_start = time.time()
+    decision_record = await claim_repo.create_decision(decision, user_id="system")
+    logger.info(f"[{request_id}] Decision record creation took {time.time() - step_start:.2f}s")
+    
+    total_time = time.time() - start_time
+    logger.info(f"[{request_id}] ✓ Decision created: {decision.proposed_status} ${decision.proposed_benefit_amount}")
+    logger.info(f"[{request_id}] ⏱️  Total process-from-drive time: {total_time:.2f}s")
+    
+    return DecisionResponse.from_decision_record(decision_record)
+
+
+@router.get("/claims/{tracking_number}/variance")
+@handle_route_errors
+async def get_variance(
+    tracking_number: str,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+):
+    """
+    Get variance data comparing proposed decision to actual decision.
+    
+    Returns actual decision data from decision_validation table if available.
+    """
+    request_id = x_request_id or str(uuid4())
+    logger.info(f"Getting variance data for tracking number: {tracking_number}")
+    
+    repository = ClaimRepository()
+    claim = await repository.get_claim_by_tracking_number(tracking_number)
+    
+    if not claim:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Claim with tracking number {tracking_number} not found"
+        )
+    
+    variance_data = await repository.get_variance_data(claim["id"])
+    
+    if not variance_data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No actual decision found for claim with tracking number {tracking_number}"
+        )
+    
+    return variance_data
 

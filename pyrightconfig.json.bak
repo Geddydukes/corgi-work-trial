@@ -1,0 +1,31 @@
+{
+  "include": [
+    "decision_service",
+    "document_service",
+    "shared",
+    "tasks",
+    "tests",
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/env",
+    "**/.venv",
+    "**/venv"
+  ],
+  "venvPath": "/Users/geddydukes/Desktop/Corgi",
+  "venv": "env",
+  "executionEnvironments": [
+    {
+      "root": "/Users/geddydukes/Desktop/Corgi",
+      "pythonVersion": "3.8",
+      "pythonPlatform": "Darwin",
+      "extraPaths": ["/Users/geddydukes/Desktop/Corgi"]
+    }
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.8"
+}

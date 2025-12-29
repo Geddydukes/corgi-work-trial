@@ -5,6 +5,7 @@ Provides consistent error handling patterns across all routes.
 """
 
 import logging
+import functools
 from fastapi import HTTPException
 from typing import Callable, TypeVar, Any
 
@@ -22,6 +23,7 @@ def handle_route_errors(func: Callable[..., T]) -> Callable[..., T]:
     - All other exceptions are logged and converted to 500 errors
     - Consistent error messages
     """
+    @functools.wraps(func)
     async def wrapper(*args, **kwargs) -> T:
         try:
             return await func(*args, **kwargs)
@@ -37,4 +39,5 @@ def handle_route_errors(func: Callable[..., T]) -> Callable[..., T]:
                 detail=f"Internal server error: {str(e)}"
             )
     return wrapper
+
 

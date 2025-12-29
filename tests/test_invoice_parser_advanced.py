@@ -589,3 +589,16 @@ class TestInvoiceParserAdvanced:
         assert result.quality_metrics.overall_confidence >= 0
         assert result.quality_metrics.overall_confidence <= 100
 
+
+
+
+
+
+
+
+
+
+
+
+
+

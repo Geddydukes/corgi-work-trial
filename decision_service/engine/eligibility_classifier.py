@@ -139,14 +139,16 @@ class EligibilityClassifier:
         
         keyword_result = self._keyword_score(normalized)
         layers['keyword_score'] = keyword_result
-        if keyword_result and keyword_result['confidence'] > 50:
+        # Lowered threshold from 50 to 40 for more lenient approval
+        if keyword_result and keyword_result['confidence'] > 40:
             result = self._apply_special_rules(keyword_result, line_item)
             return self._build_result(line_item, result, layers)
         
         if self.ml_model:
             ml_result = self._ml_predict(normalized)
             layers['ml_prediction'] = ml_result
-            if ml_result and ml_result['confidence'] > 70:
+            # Lowered threshold from 70 to 60 for more lenient approval
+            if ml_result and ml_result['confidence'] > 60:
                 result = self._apply_special_rules(ml_result, line_item)
                 return self._build_result(line_item, result, layers)
         

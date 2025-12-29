@@ -188,6 +188,8 @@ def should_be_included_deterministic(
     """
     Deterministically determine if a line item should be included.
     
+    More lenient policy: Approve by default unless explicitly ineligible.
+    
     Args:
         category: LineItemCategory from phrase matching
         is_normal_wear_tear: Whether item is normal wear/tear (from LLM suggestion or rules)
@@ -201,7 +203,8 @@ def should_be_included_deterministic(
         if amount > Decimal("100000") or amount < Decimal("0"):
             return False
     
-    # Auto-deny categories (regardless of addendum coverage)
+    # Only auto-deny the most clear-cut ineligible categories
+    # Removed: is_contractual_fee, is_after_lease_end (be more lenient)
     if category.is_rent:
         return False
     
@@ -214,28 +217,26 @@ def should_be_included_deterministic(
     if category.is_other_insurance:
         return False
     
-    if category.is_contractual_fee:
+    # Only deny normal wear/tear if explicitly flagged (be more lenient)
+    if is_normal_wear_tear and category.is_normal_wear_tear:
         return False
     
-    if category.is_after_lease_end:
-        return False
-    
-    if is_normal_wear_tear:
-        return False
-    
-    # If not covered by addendum, deny (unless it's a clear damage/repair/cleaning)
-    if not is_covered_by_addendum:
-        # Only approve if it's clearly damage/repair/cleaning (might be misclassified)
-        if category.is_cleaning or category.is_repair or category.is_damage:
-            return True
-        return False
-    
-    # If covered by addendum and not in denial categories, approve
+    # More lenient: Approve if it's any type of cleaning, repair, or damage
+    # Even if not explicitly covered by addendum (assume it might be)
     if category.is_cleaning or category.is_repair or category.is_damage:
         return True
     
-    # Default: if covered by addendum and no explicit denial category, approve
-    return True
+    # More lenient: If covered by addendum, approve everything except explicit denials
+    if is_covered_by_addendum:
+        return True
+    
+    # More lenient default: If not explicitly denied and not clearly ineligible, approve
+    # This is a more approval-leaning policy
+    if not category.is_rent and not category.is_month_to_month and not category.is_improper_notice and not category.is_other_insurance:
+        return True
+    
+    # Only deny if explicitly in one of the denial categories
+    return False
 
 
 def is_cleaning_only_invoice(line_items: List[Dict]) -> bool:

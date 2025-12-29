@@ -562,3 +562,4 @@ def downgrade():
     # Drop schema
     op.execute("DROP SCHEMA IF EXISTS claims CASCADE")
 
+

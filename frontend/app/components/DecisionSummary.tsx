@@ -106,9 +106,9 @@ export default function DecisionSummary({
           <p className={`text-lg font-medium ${
             hasChanges ? 'text-blue-600' : 'text-gray-900'
           }`}>
-            ${liveTotal.toFixed(2)}
+            ${(liveTotal ?? 0).toFixed(2)}
           </p>
-          {hasChanges && decision.proposed_benefit_amount !== liveTotal && (
+          {hasChanges && decision.proposed_benefit_amount !== liveTotal && liveTotal != null && (
             <p className="text-xs text-gray-500">
               Original: ${decision.proposed_benefit_amount.toFixed(2)}
             </p>

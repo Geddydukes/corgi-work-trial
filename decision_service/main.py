@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from decision_service.routes import claims, health, batch
 
@@ -44,6 +45,23 @@ app.add_middleware(
 app.include_router(health.router, tags=["Health"])
 app.include_router(claims.router, prefix="/api/v1", tags=["Claims"])
 app.include_router(batch.router, prefix="/api/v1", tags=["Batch"])
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to prevent server crashes from unhandled exceptions."""
+    logger.error(
+        f"Unhandled exception in {request.method} {request.url.path}: {exc}",
+        exc_info=True
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": f"Internal server error: {str(exc)}",
+            "path": str(request.url.path),
+            "method": request.method
+        }
+    )
 
 
 @app.get("/")

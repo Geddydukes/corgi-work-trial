@@ -156,3 +156,16 @@ class ReconciliationResult:
     negative_amounts_found: bool
     notes: List[str] = field(default_factory=list)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
