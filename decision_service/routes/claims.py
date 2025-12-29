@@ -3,11 +3,30 @@ from typing import Optional
 from uuid import uuid4
 import logging
 import asyncio
+import json
+import tempfile
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from decision_service.schemas.request import DecisionRequest, UpdateDecisionRequest, ProcessFromDriveRequest
 from decision_service.schemas.response import DecisionResponse
 from shared.models import DocumentType
+from shared.database import get_engine
+from shared.config import Config
+from shared.google_drive import GoogleDriveService
+from decision_service.routes.claim_helpers import (
+    process_line_item_overrides,
+    calculate_cap_amount,
+    determine_new_status,
+    build_decision_record_dict
+)
+from decision_service.engine.decision_engine import DecisionEngine
+from decision_service.repositories.claim_repository import ClaimRepository
+from decision_service.repositories.override_repository import OverrideRepository
+from decision_service.repositories.document_repository import DocumentRepository
+from document_service.processor import DocumentProcessor
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,9 +50,6 @@ async def create_decision(
     request_id = x_request_id or str(uuid4())
     
     try:
-        from decision_service.engine.decision_engine import DecisionEngine
-        from decision_service.repositories.claim_repository import ClaimRepository
-        
         engine = DecisionEngine()
         repository = ClaimRepository()
         
@@ -70,8 +86,6 @@ async def get_decision(
     request_id = x_request_id or str(uuid4())
     
     try:
-        from decision_service.repositories.claim_repository import ClaimRepository
-        
         repository = ClaimRepository()
         decision_record = await repository.get_latest_decision_by_tracking_number(tracking_number)
         
@@ -130,12 +144,6 @@ async def update_decision(
     request_id = x_request_id or str(uuid4())
     
     try:
-        from decision_service.repositories.claim_repository import ClaimRepository
-        from decision_service.repositories.override_repository import OverrideRepository
-        from sqlalchemy import create_engine, text
-        from shared.config import Config
-        import json
-        
         claim_repo = ClaimRepository()
         override_repo = OverrideRepository()
         
@@ -143,11 +151,12 @@ async def update_decision(
         if not claim:
             raise HTTPException(status_code=404, detail=f"Claim with tracking number {tracking_number} not found")
         
-        # Get the decision
         if not Config.DATABASE_URL:
             raise HTTPException(status_code=500, detail="Database not configured")
         
-        engine = create_engine(Config.DATABASE_URL)
+        engine = get_engine()
+        if not engine:
+            raise HTTPException(status_code=500, detail="Database engine not available")
         with engine.connect() as conn:
             conn.execute(text("SET search_path TO claims, public"))
             
@@ -167,11 +176,16 @@ async def update_decision(
             if not decision_result:
                 raise HTTPException(status_code=404, detail=f"Decision {decision_id} not found")
             
-            # Get all line items (approved + ineligible)
-            all_approved = json.loads(decision_result[2]) if isinstance(decision_result[2], str) else (decision_result[2] if decision_result[2] else [])
-            all_ineligible = json.loads(decision_result[3]) if isinstance(decision_result[3], str) else (decision_result[3] if decision_result[3] else [])
+            decision_cols = ['id', 'claim_id', 'approved_line_items', 'ineligible_line_items',
+                            'decision_type', 'proposed_status', 'proposed_benefit_amount',
+                            'eligible_total', 'invoice_total', 'cap_amount', 'flags', 'missing_data',
+                            'reasoning', 'confidence_score', 'engine_version', 'processing_time_ms',
+                            'decided_at']
+            decision_dict = {col: decision_result[i] for i, col in enumerate(decision_cols)}
             
-            # Create index maps for quick lookup
+            all_approved = json.loads(decision_dict['approved_line_items']) if isinstance(decision_dict['approved_line_items'], str) else (decision_dict['approved_line_items'] if decision_dict['approved_line_items'] else [])
+            all_ineligible = json.loads(decision_dict['ineligible_line_items']) if isinstance(decision_dict['ineligible_line_items'], str) else (decision_dict['ineligible_line_items'] if decision_dict['ineligible_line_items'] else [])
+            
             all_items = []
             item_index_map = {}
             current_index = 0
@@ -186,7 +200,6 @@ async def update_decision(
                 item_index_map[current_index] = item
                 current_index += 1
             
-            # Create override map for quick lookup
             override_map = {}
             for override in request.approved_line_items:
                 override_map[override.line_item_index] = {
@@ -199,107 +212,34 @@ async def update_decision(
                     'reasoning': override.user_reasoning
                 }
             
-            # Process all items based on overrides
-            overrides_to_save = []
-            new_approved = []
-            new_ineligible = []
+            original_included_map = {
+                index: item.get('_original_included', False)
+                for index, item in enumerate(all_items)
+            }
             
-            for index, item in enumerate(all_items):
-                original_included = item.get('_original_included', False)
-                override = override_map.get(index)
-                
-                # Determine if item should be included (override or original)
-                should_be_included = override['should_be_included'] if override is not None else original_included
-                
-                # Extract line item data - handle both simple format and complex format
-                if isinstance(item, dict):
-                    if 'line_item' in item:
-                        line_item_data = item['line_item']
-                        analysis = item.get('analysis', {})
-                    else:
-                        line_item_data = item
-                        analysis = {}
-                else:
-                    line_item_data = {'description': str(item), 'amount': 0}
-                    analysis = {}
-                
-                # Get reason from override, analysis, or item
-                reason = None
-                if override and override.get('reasoning'):
-                    reason = override['reasoning']
-                elif analysis:
-                    reason = analysis.get('reasoning') or analysis.get('reason')
-                elif isinstance(item, dict):
-                    reason = item.get('reason')
-                
-                # Build simple line item for response
-                simple_item = {
-                    'description': line_item_data.get('description', ''),
-                    'amount': float(line_item_data.get('amount', 0)),
-                    'reason': reason
-                }
-                
-                if should_be_included:
-                    new_approved.append(simple_item)
-                else:
-                    new_ineligible.append(simple_item)
-                
-                # Save override if changed
-                if override and override['should_be_included'] != original_included:
-                    overrides_to_save.append({
-                        'line_item_index': index,
-                        'line_item_description': line_item_data.get('description', ''),
-                        'line_item_amount': float(line_item_data.get('amount', 0)),
-                        'system_should_be_included': original_included,
-                        'system_categories': json.dumps({
-                            'is_rent': item.get('is_rent', False) if isinstance(item, dict) else False,
-                            'is_cleaning': item.get('is_cleaning', False) if isinstance(item, dict) else False,
-                            'is_repair': item.get('is_repair', False) if isinstance(item, dict) else False,
-                            'is_damage': item.get('is_damage', False) if isinstance(item, dict) else False,
-                        }),
-                        'system_reasoning': analysis.get('reasoning') or analysis.get('reason') if analysis else None,
-                        'system_confidence': float(analysis.get('confidence', 0.5)) if analysis and analysis.get('confidence') else None,
-                        'user_should_be_included': override['should_be_included'],
-                        'user_reasoning': override.get('reasoning')
-                    })
+            new_approved, new_ineligible, overrides_to_save = process_line_item_overrides(
+                all_items, override_map, original_included_map
+            )
             
-            # Calculate new totals
             new_eligible_total = sum(item['amount'] for item in new_approved)
             new_proposed_benefit = new_eligible_total
             
-            # Determine new cap amount
-            new_cap_amount = None
-            if request.cap_enabled:
-                # Use override cap if provided, otherwise use original cap
-                if request.override_cap_amount is not None:
-                    new_cap_amount = float(request.override_cap_amount)
-                else:
-                    new_cap_amount = float(decision_result[9]) if decision_result[9] else None
-                
-                if new_cap_amount is not None and new_proposed_benefit > new_cap_amount:
-                    new_proposed_benefit = new_cap_amount
-            # If cap is disabled, new_proposed_benefit stays as new_eligible_total and cap_amount is None
+            new_cap_amount = calculate_cap_amount(
+                request.cap_enabled,
+                request.override_cap_amount,
+                decision_dict['cap_amount']
+            )
             
-            # Determine new status (allow override from deny to approve)
-            original_status = decision_result[5]  # proposed_status
-            new_status = original_status
-            if request.override_status:
-                # Validate status override
-                if request.override_status.lower() in ['approve', 'deny', 'pending']:
-                    new_status = request.override_status.lower()
-                else:
-                    logger.warning(f"Invalid status override: {request.override_status}, keeping original status")
+            if new_cap_amount is not None and new_proposed_benefit > new_cap_amount:
+                new_proposed_benefit = new_cap_amount
             
-            # If status is being changed to approve and there's a benefit amount, ensure status is approve
-            if new_proposed_benefit > 0 and new_status == 'deny':
-                # If user is overriding to approve, use that
-                if request.override_status and request.override_status.lower() == 'approve':
-                    new_status = 'approve'
-                # Otherwise, if there are approved items, auto-change to approve
-                elif len(new_approved) > 0:
-                    new_status = 'approve'
+            new_status = determine_new_status(
+                decision_dict['proposed_status'],
+                request.override_status,
+                new_proposed_benefit,
+                len(new_approved)
+            )
             
-            # Update decision
             conn.execute(
                 text("""
                     UPDATE decisions
@@ -324,7 +264,6 @@ async def update_decision(
                 }
             )
             
-            # Save overrides
             await override_repo.save_line_item_overrides(
                 decision_id=decision_id,
                 claim_id=claim['id'],
@@ -335,50 +274,41 @@ async def update_decision(
             
             conn.commit()
             
-            # Get updated decision
             updated_result = conn.execute(
                 text("""
-                    SELECT id, claim_id, approved_line_items, ineligible_line_items,
-                           decision_type, proposed_status, proposed_benefit_amount,
-                           eligible_total, invoice_total, cap_amount, flags, missing_data,
-                           reasoning, confidence_score, engine_version, processing_time_ms,
-                           decided_at
-                    FROM decisions
-                    WHERE id = :decision_id
+                    SELECT 
+                        d.id, d.claim_id, d.approved_line_items, d.ineligible_line_items,
+                        d.decision_type, d.proposed_status, d.proposed_benefit_amount,
+                        d.eligible_total, d.invoice_total, d.cap_amount, d.flags, d.missing_data,
+                        d.reasoning, d.confidence_score, d.engine_version, d.processing_time_ms,
+                        d.decided_at, c.claim_tracking_number
+                    FROM decisions d
+                    JOIN claims c ON c.id = d.claim_id
+                    WHERE d.id = :decision_id
                 """),
                 {'decision_id': decision_id}
             ).fetchone()
             
-            tracking_result = conn.execute(
-                text("SELECT claim_tracking_number FROM claims WHERE id = :claim_id"),
-                {"claim_id": claim['id']}
-            ).fetchone()
-            tracking_number = tracking_result[0] if tracking_result else None
+            tracking_number = None
+            if updated_result:
+                updated_cols = ['id', 'claim_id', 'approved_line_items', 'ineligible_line_items',
+                               'decision_type', 'proposed_status', 'proposed_benefit_amount',
+                               'eligible_total', 'invoice_total', 'cap_amount', 'flags', 'missing_data',
+                               'reasoning', 'confidence_score', 'engine_version', 'processing_time_ms',
+                               'decided_at', 'claim_tracking_number']
+                updated_dict_temp = {col: updated_result[i] for i, col in enumerate(updated_cols)}
+                tracking_number = updated_dict_temp['claim_tracking_number']
             
-            decision_record = {
-                "id": updated_result[0],
-                "claim_id": updated_result[1],
-                "tracking_number": tracking_number,
-                "decision_type": updated_result[4],
-                "proposed_status": updated_result[5],
-                "proposed_benefit_amount": float(updated_result[6]),
-                "eligible_total": float(updated_result[7]),
-                "invoice_total": float(updated_result[8]),
-                "cap_amount": float(updated_result[9]) if updated_result[9] else None,
-                "claim_amount": float(claim.get('claim_amount', 0)),
-                "max_benefit": float(claim.get('max_benefit', 0)) if claim.get('max_benefit') else None,
-                "document_count": 0,
-                "line_item_count": len(new_approved) + len(new_ineligible),
-                "approved_line_items": new_approved,
-                "ineligible_line_items": new_ineligible,
-                "flags": json.loads(updated_result[10]) if isinstance(updated_result[10], str) else (updated_result[10] if updated_result[10] else {}),
-                "missing_data": json.loads(updated_result[11]) if isinstance(updated_result[11], str) else (updated_result[11] if updated_result[11] else {}),
-                "reasoning": json.loads(updated_result[12]) if isinstance(updated_result[12], str) else (updated_result[12] if updated_result[12] else {}),
-                "confidence_score": float(updated_result[13]) if updated_result[13] else 0.0,
-                "engine_version": updated_result[14],
-                "processing_time_ms": updated_result[15],
-                "decided_at": updated_result[16],
-            }
+            updated_cols = ['id', 'claim_id', 'approved_line_items', 'ineligible_line_items',
+                           'decision_type', 'proposed_status', 'proposed_benefit_amount',
+                           'eligible_total', 'invoice_total', 'cap_amount', 'flags', 'missing_data',
+                           'reasoning', 'confidence_score', 'engine_version', 'processing_time_ms',
+                           'decided_at', 'claim_tracking_number']
+            updated_dict = {col: updated_result[i] for i, col in enumerate(updated_cols)} if updated_result else {}
+            
+            decision_record = build_decision_record_dict(
+                updated_dict, tracking_number, claim, new_approved, new_ineligible
+            )
             
             return DecisionResponse.from_decision_record(decision_record)
         
@@ -409,18 +339,6 @@ async def process_claim_from_drive(
     request_id = x_request_id or str(uuid4())
     
     try:
-        from shared.config import Config
-        from shared.google_drive import GoogleDriveService
-        from document_service.processor import DocumentProcessor
-        from decision_service.engine.decision_engine import DecisionEngine
-        from decision_service.repositories.claim_repository import ClaimRepository
-        from decision_service.repositories.document_repository import DocumentRepository
-        from pathlib import Path
-        import tempfile
-        import hashlib
-        from sqlalchemy import create_engine, text
-        
-        # Get claim from database (must exist)
         claim_repo = ClaimRepository()
         claim = await claim_repo.get_claim_by_tracking_number(request.tracking_number)
         
@@ -432,7 +350,6 @@ async def process_claim_from_drive(
         
         logger.info(f"Using existing claim {request.tracking_number} (ID: {claim['id']})")
         
-        # Initialize Google Drive service
         credentials_path = Config.GOOGLE_DRIVE_CREDENTIALS or "google-drive-credentials.json"
         if not Path(credentials_path).exists():
             raise HTTPException(
@@ -445,11 +362,8 @@ async def process_claim_from_drive(
             use_service_account=Config.GOOGLE_DRIVE_USE_SERVICE_ACCOUNT
         )
         
-        # Extract folder ID from URL if needed
         folder_id = drive_service.extract_folder_id_from_url(request.drive_folder_id)
         
-        # Check if we need to find a subfolder by tracking number
-        # First, try to list files directly in the provided folder
         logger.info(f"Checking Google Drive folder {folder_id}")
         drive_files = drive_service.list_folder_files(
             folder_id=folder_id,
@@ -457,7 +371,6 @@ async def process_claim_from_drive(
             recursive=False
         )
         
-        # If no files found, look for a subfolder with the tracking number name
         if not drive_files:
             logger.info(f"No files found in root folder, looking for subfolder '{request.tracking_number}'...")
             subfolder = drive_service.get_file_by_name(folder_id, request.tracking_number)
@@ -493,38 +406,32 @@ async def process_claim_from_drive(
         
         logger.info(f"Found {len(drive_files)} files in Google Drive folder")
         
-        # Process documents in parallel for better performance
         doc_processor = DocumentProcessor()
-        engine = create_engine(Config.DATABASE_URL)
+        engine = get_engine()
+        if not engine:
+            raise HTTPException(status_code=500, detail="Database engine not available")
         
         async def process_single_document(drive_file):
             """Process a single document from Google Drive."""
             try:
                 logger.info(f"Downloading: {drive_file.name}")
                 
-                # Download file (this is I/O bound, run in thread pool)
                 loop = asyncio.get_event_loop()
                 file_stream, filename, mime_type = await loop.run_in_executor(
-                    None,  # Use default executor
+                    None,
                     drive_service.download_file_to_stream,
                     drive_file.id
                 )
                 
-                # Read file content once
                 file_content = file_stream.read()
-                
-                # Calculate file hash
                 file_hash = hashlib.sha256(file_content).hexdigest()
                 
-                # Write to temp file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
                     tmp_file.write(file_content)
                     tmp_path = Path(tmp_file.name)
                 
                 logger.info(f"Processing: {filename}")
                 
-                # Process document (OCR, classification) - this can use Gemini
-                # The process_document is already async, so we can await it directly
                 result = await doc_processor.process_document(
                     file_path=tmp_path,
                     claim_id=claim['id'],
@@ -532,7 +439,6 @@ async def process_claim_from_drive(
                     force_high_quality=False
                 )
                 
-                # Clean up temp file
                 tmp_path.unlink()
                 
                 if result.errors:
@@ -540,7 +446,6 @@ async def process_claim_from_drive(
                     logger.error(f"Error processing {filename}: {', '.join(error_messages)}")
                     return None
                 
-                # Save document to database
                 with engine.connect() as conn:
                     conn.execute(text("SET search_path TO claims, public"))
                     
@@ -589,19 +494,16 @@ async def process_claim_from_drive(
                 logger.error(f"Error processing document {drive_file.name}: {e}", exc_info=True)
                 return None
         
-        # Process all documents in parallel (limit concurrency to avoid overwhelming API)
         logger.info(f"Processing {len(drive_files)} documents in parallel (max 3 concurrent)...")
-        semaphore = asyncio.Semaphore(3)  # Process 3 documents concurrently to balance speed vs API limits
+        semaphore = asyncio.Semaphore(3)
         
         async def process_with_semaphore(drive_file):
             async with semaphore:
                 return await process_single_document(drive_file)
         
-        # Process all documents concurrently (up to 3 at a time)
         results = await asyncio.gather(*[process_with_semaphore(f) for f in drive_files], return_exceptions=True)
         processed_count = sum(1 for r in results if r is True)
         
-        # Log any exceptions
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(f"Exception processing {drive_files[i].name}: {result}", exc_info=result)
@@ -614,7 +516,6 @@ async def process_claim_from_drive(
         
         logger.info(f"Processed {processed_count}/{len(drive_files)} documents")
         
-        # Run decision engine
         logger.info("Running decision engine...")
         decision_engine = DecisionEngine()
         decision = await decision_engine.evaluate_claim(
@@ -622,7 +523,6 @@ async def process_claim_from_drive(
             override_max_benefit=request.override_max_benefit
         )
         
-        # Save decision
         decision_record = await claim_repo.create_decision(decision, user_id="system")
         
         logger.info(f"✓ Decision created: {decision.proposed_status} ${decision.proposed_benefit_amount}")

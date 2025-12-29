@@ -34,6 +34,7 @@ ENV/
 *.log
 run_output_*.log
 claim_*.log
+logs/
 
 # Variance reports (generated files)
 variance_report_*.txt
@@ -50,6 +51,7 @@ variance_report_*.txt
 # Google Drive credentials
 google-drive-credentials.json
 *credentials*.json
+credentials/
 
 # IDE
 .idea/

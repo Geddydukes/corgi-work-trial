@@ -95,7 +95,7 @@ This document lists all files involved in the decision-making process for analyz
 
 ### Environment Variables
 
-- **`env.example`** - Environment variable template
+- **`.env.example`** - Environment variable template
   - `GEMINI_API_KEY` - API key for Gemini
   - `GEMINI_MODEL` - Model to use (gemini-2.5-flash or gemini-2.5-pro)
 

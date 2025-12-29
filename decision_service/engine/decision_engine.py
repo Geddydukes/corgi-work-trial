@@ -85,19 +85,15 @@ class DecisionEngine:
             for doc in documents
         )
         
-        # Analyze all documents for denial reasons using Gemini (batch processing)
         logger.info(f"Batch analyzing {len(documents)} documents for denial reasons with Gemini 2.5 Pro...")
         document_analysis = self.document_analyzer.analyze_all_documents(documents)
         
-        # Check for critical denial reasons
         if document_analysis.get('should_deny'):
             logger.warning(f"Document analysis suggests denial: {document_analysis.get('denial_reasons', [])}")
         
         if document_analysis.get('charges_covered_by_addendum'):
             logger.info(f"Document analysis indicates charges are covered by addendum protections")
         
-        # Extract line items using Gemini for invoice/statement documents
-        # Only extract from actual invoices/move-out statements, not all documents
         all_line_items = []
         invoice_total = Decimal("0")
         
@@ -106,7 +102,6 @@ class DecisionEngine:
             filename = doc.get('original_filename', '')
             text = doc.get('extracted_text', '')
             
-            # Only extract from move-out invoices/statements, NOT authorization forms or other documents
             filename_lower = filename.lower()
             is_authorization_form = (
                 'authorization' in filename_lower or
@@ -130,7 +125,6 @@ class DecisionEngine:
                     extracted_items = self.document_analyzer.extract_line_items_from_invoice(text, filename)
                 except Exception as e:
                     logger.warning(f"Gemini line item extraction failed for {filename}: {e}, falling back to InvoiceParser")
-                    # Fallback to InvoiceParser if Gemini fails
                     try:
                         from decision_service.engine.invoice_parser import InvoiceParser
                         parser = InvoiceParser()
@@ -142,18 +136,13 @@ class DecisionEngine:
                 
                 if extracted_items:
                     all_line_items.extend(extracted_items)
-                    # Calculate invoice_total as sum of POSITIVE charges only (exclude payments/credits and prior balances)
-                    # Payments/credits are negative amounts and should not reduce the invoice total
-                    # Initial/beginning balances are prior balances, not new charges on this invoice
                     for item in extracted_items:
                         amount = Decimal(str(item.get('amount', 0)))
                         description = str(item.get('description', '')).lower()
-                        # Exclude initial/beginning balances (prior balances, not new charges)
                         is_prior_balance = any(phrase in description for phrase in [
                             'balance as of', 'beginning balance', 'initial balance', 
                             'prior balance', 'opening balance', 'balance forward'
                         ])
-                        # Only add positive amounts (charges), not negative amounts (payments/credits) or prior balances
                         if amount > 0 and not is_prior_balance:
                             invoice_total += amount
         
@@ -166,7 +155,6 @@ class DecisionEngine:
         
         logger.info(f"Extracted {len(all_line_items)} line items from invoices/statements")
         
-        # Get addendum text and lease text for line item analysis
         addendum_text = None
         lease_text = None
         for doc in documents:
@@ -236,12 +224,10 @@ class DecisionEngine:
             else:
                 eligible_total = raw_eligible_total
             
-            # Build approved/ineligible item lists (don't recalculate eligible_total here!)
             for item in line_items_with_flags:
                 amount = Decimal(str(item.get('amount', 0)))
                 should_include = item.get('should_be_included', False)
                 
-                # Create item dict with analysis (preserve all deterministic rule info)
                 item_with_analysis = {
                     'line_item': {
                         'description': item.get('description', ''),
@@ -257,7 +243,6 @@ class DecisionEngine:
                         'reasoning': item.get('analysis_reasoning', item.get('llm_reasoning', '')),
                         'addendum_reference': item.get('addendum_reference', item.get('llm_addendum_reference', 'N/A'))
                     },
-                    # Preserve deterministic rule information for logging and future rule improvement
                     'deterministic_rule': item.get('deterministic_rule', ''),
                     'is_rent': item.get('is_rent', False),
                     'is_month_to_month': item.get('is_month_to_month', False),
@@ -274,11 +259,9 @@ class DecisionEngine:
                 
                 if should_include:
                     approved_items.append(item_with_analysis)
-                    # DON'T add to eligible_total here - already calculated above!
                 else:
                     ineligible_items.append(item_with_analysis)
             
-            # Update eligibility_result with recalculated values
             eligibility_result["approved_items"] = approved_items
             eligibility_result["ineligible_items"] = ineligible_items
             eligibility_result["eligible_total"] = eligible_total

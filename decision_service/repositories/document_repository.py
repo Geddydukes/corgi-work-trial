@@ -1,15 +1,16 @@
 import logging
 from typing import List, Dict, Optional
 
+from decision_service.repositories.base_repository import BaseRepository
+from shared.config import Config
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
 
-class DocumentRepository:
+class DocumentRepository(BaseRepository):
     async def get_documents(self, claim_id: int) -> List[dict]:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock data")
             return [
                 {
@@ -22,9 +23,7 @@ class DocumentRepository:
             ]
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 result = conn.execute(
                     text("""
                         SELECT 
@@ -69,10 +68,7 @@ class DocumentRepository:
         tracking_number: str,
         document_type: Optional[str] = None
     ) -> List[dict]:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock data")
             mock_docs = [
                 {
@@ -95,9 +91,7 @@ class DocumentRepository:
             return mock_docs
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
                 query = """
                     SELECT 

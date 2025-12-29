@@ -77,6 +77,20 @@ export default function DecisionSummary({
                 {overrideStatus === 'approve' ? '✓ Overridden' : 'Override to Approve'}
               </button>
             )}
+            {decision.proposed_status === 'approve' && (
+              <button
+                type="button"
+                onClick={() => onStatusOverrideChange(overrideStatus === 'deny' ? undefined : 'deny')}
+                className={`text-xs px-2 py-1 rounded ${
+                  overrideStatus === 'deny'
+                    ? 'bg-red-100 text-red-700 border border-red-300'
+                    : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                }`}
+                title="Override status to Deny"
+              >
+                {overrideStatus === 'deny' ? '✓ Overridden' : 'Override to Deny'}
+              </button>
+            )}
           </div>
           {overrideStatus && overrideStatus !== decision.proposed_status && (
             <p className="text-xs text-gray-500 mt-1">

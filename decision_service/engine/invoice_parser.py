@@ -2,6 +2,7 @@ import logging
 from decimal import Decimal
 from typing import Dict, List
 
+from shared.models import DocumentType
 from decision_service.engine.invoice_parser_advanced import AdvancedInvoiceParser
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,6 @@ class InvoiceParser:
         self,
         documents: List[dict]
     ) -> dict:
-        from shared.models import DocumentType
-        
-        # First, try to find explicitly classified invoices
         invoice_docs = [
             doc for doc in documents 
             if doc.get("document_type") == DocumentType.INVOICE.value

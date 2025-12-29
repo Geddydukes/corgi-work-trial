@@ -1,33 +1,30 @@
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime
-from uuid import UUID
+from uuid import uuid4
+
+from decision_service.repositories.base_repository import BaseRepository
+from shared.config import Config
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
 
-class BatchRepository:
+class BatchRepository(BaseRepository):
     async def create_batch_job(
         self,
         claim_ids: List[int],
         webhook_url: Optional[str] = None,
         priority: int = 0
     ) -> str:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        from uuid import uuid4
-        
         batch_id = str(uuid4())
         
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock batch_id")
             return batch_id
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
-                
+            with self.get_connection() as conn:
                 for claim_id in claim_ids:
                     conn.execute(
                         text("""
@@ -51,10 +48,7 @@ class BatchRepository:
             raise
     
     async def get_batch_job(self, batch_id: str) -> Optional[Dict]:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock batch status")
             return {
                 "batch_id": batch_id,
@@ -68,10 +62,7 @@ class BatchRepository:
             }
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
-                
+            with self.get_connection() as conn:
                 result = conn.execute(
                     text("""
                         SELECT 
@@ -98,18 +89,25 @@ class BatchRepository:
                     {"batch_id": batch_id}
                 ).fetchone()
                 
-                if not result or result[0] == 0:
+                if not result:
+                    return None
+                
+                batch_cols = ['claim_count', 'processed_count', 'successful_count', 'failed_count',
+                            'started_at', 'completed_at', 'status']
+                batch_dict = {col: result[i] for i, col in enumerate(batch_cols)}
+                
+                if batch_dict['claim_count'] == 0:
                     return None
                 
                 return {
                     "batch_id": batch_id,
-                    "status": result[6],
-                    "claim_count": result[0],
-                    "processed_count": result[1],
-                    "successful_count": result[2],
-                    "failed_count": result[3],
-                    "started_at": result[4].isoformat() if result[4] else None,
-                    "completed_at": result[5].isoformat() if result[5] else None,
+                    "status": batch_dict['status'],
+                    "claim_count": batch_dict['claim_count'],
+                    "processed_count": batch_dict['processed_count'],
+                    "successful_count": batch_dict['successful_count'],
+                    "failed_count": batch_dict['failed_count'],
+                    "started_at": batch_dict['started_at'].isoformat() if batch_dict['started_at'] else None,
+                    "completed_at": batch_dict['completed_at'].isoformat() if batch_dict['completed_at'] else None,
                 }
         except Exception as e:
             logger.error(f"Error fetching batch job {batch_id}: {e}", exc_info=True)
@@ -122,18 +120,12 @@ class BatchRepository:
         status: str,
         error_message: Optional[str] = None
     ) -> bool:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, skipping update")
-            return True
+            return False
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
-                
+            with self.get_connection() as conn:
                 update_data = {
                     'batch_id': batch_id,
                     'claim_id': claim_id,
@@ -168,18 +160,12 @@ class BatchRepository:
             return False
     
     async def get_batch_claims(self, batch_id: str) -> List[int]:
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning empty list")
             return []
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
-                
+            with self.get_connection() as conn:
                 result = conn.execute(
                     text("""
                         SELECT DISTINCT claim_id

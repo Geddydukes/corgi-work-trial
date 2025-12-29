@@ -3,10 +3,13 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import json
 
+from decision_service.repositories.base_repository import BaseRepository
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
 
-class OverrideRepository:
+class OverrideRepository(BaseRepository):
     async def save_line_item_overrides(
         self,
         decision_id: int,
@@ -16,22 +19,16 @@ class OverrideRepository:
         user_role: Optional[str] = None
     ) -> bool:
         """Save line item overrides to the database."""
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, skipping override save")
-            return True
+            return False
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
                 batch_id = f"batch_{datetime.utcnow().strftime('%Y_%m_%d')}"
                 
                 for override in overrides:
-                    # Check if override already exists
                     existing = conn.execute(
                         text("""
                             SELECT id FROM user_line_item_overrides
@@ -44,7 +41,7 @@ class OverrideRepository:
                     ).fetchone()
                     
                     if existing:
-                        # Update existing override
+                        existing_id = existing[0]
                         conn.execute(
                             text("""
                                 UPDATE user_line_item_overrides
@@ -54,13 +51,12 @@ class OverrideRepository:
                                 WHERE id = :id
                             """),
                             {
-                                'id': existing[0],
+                                'id': existing_id,
                                 'included': override['user_should_be_included'],
                                 'reasoning': override.get('user_reasoning')
                             }
                         )
                     else:
-                        # Insert new override
                         conn.execute(
                             text("""
                                 INSERT INTO user_line_item_overrides (
@@ -108,16 +104,11 @@ class OverrideRepository:
         decision_id: int
     ) -> List[Dict]:
         """Get all line item overrides for a decision."""
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             return []
         
         try:
-            engine = create_engine(Config.DATABASE_URL)
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
                 result = conn.execute(
                     text("""
@@ -131,6 +122,8 @@ class OverrideRepository:
                     {'decision_id': decision_id}
                 ).fetchall()
                 
+                override_cols = ['line_item_index', 'user_should_be_included', 'user_reasoning',
+                               'system_should_be_included', 'override_timestamp']
                 return [
                     {
                         'line_item_index': row[0],

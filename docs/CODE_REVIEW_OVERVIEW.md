@@ -1,12 +1,15 @@
 # Code Review Overview - Security Deposit Claims Decision Engine
 
+**Last Updated**: December 28, 2025  
+**Related Documents**: See `docs/CODE_REVIEW_FINDINGS.md` for detailed code quality analysis
+
 ## System Purpose
 
 **Security Deposit Claims Decision Engine** - An enterprise-grade system that:
 
 - Processes security deposit claim documents (PDFs, images) using multi-tier OCR
 - Classifies documents (lease, invoice, addendum, etc.) using ML + rules
-- Parses invoices to extract line items and amounts using Gemini 2.5 Pro/Flash
+- Parses invoices to extract line items and amounts using Gemini 2.5 Flash/Pro
 - Evaluates claim eligibility based on business rules
 - Generates automated decisions (approve/deny) with confidence scores
 - Handles high-volume processing (target: 5,000 claims/hour)
@@ -49,13 +52,14 @@
 
 ### Technology Stack
 
-- **Language**: Python 3.11 (backend), TypeScript (frontend)
-- **Framework**: FastAPI (async backend), Next.js 14+ (frontend)
-- **Database**: PostgreSQL 14+ (with connection pooling)
+- **Language**: Python 3.11+ (backend), TypeScript 5+ (frontend)
+- **Framework**: FastAPI (async backend), Next.js 16.1 (frontend)
+- **UI Library**: React 19.2 with Tailwind CSS 4
+- **Database**: PostgreSQL 14+ (with connection pooling via shared manager)
 - **Cache/Queue**: Redis + Celery
 - **OCR**: Multi-tier (PyPDF2 → Tesseract → Gemini/Mistral)
 - **ML**: scikit-learn (TF-IDF + Logistic Regression)
-- **AI**: Google Gemini 2.5 Pro/Flash for document analysis
+- **AI**: Google Gemini 2.5 Flash/Pro for document analysis (configurable via `GEMINI_MODEL`)
 - **Storage**: Google Drive API for document retrieval
 
 ## Key API Endpoints
@@ -199,10 +203,16 @@
 
 ### Repositories
 
+All repositories inherit from `BaseRepository` (`decision_service/repositories/base_repository.py`) which provides:
+
+- Shared database connection pooling via `shared/database.py`
+- Consistent error handling patterns
+- Connection context management
+- Row-to-dictionary conversion utilities
+
 - **ClaimRepository** (`decision_service/repositories/claim_repository.py`)
 
-  - Connection pooling for database queries
-  - Cached engine instance for performance
+  - Connection pooling via shared engine manager
   - Methods: `get_claim`, `get_claim_by_tracking_number`, `get_latest_decision_by_tracking_number`, `create_claim`, `create_decision`
 
 - **OverrideRepository** (`decision_service/repositories/override_repository.py`)
@@ -217,6 +227,8 @@
 - **BatchRepository** (`decision_service/repositories/batch_repository.py`)
   - Batch job management
   - Status tracking
+
+**Database Connection Management**: All repositories use the shared `get_engine()` function from `shared/database.py` which provides a cached engine with connection pooling (pool_size=5, max_overflow=10, pool_recycle=3600s).
 
 ## Business Rules (from PRD)
 
@@ -253,9 +265,11 @@ proposed_benefit = min(eligible_total, cap_amount)
 
 ### Database
 
-- **Connection Pooling**: Cached engine with pool_size=5, max_overflow=10
-- **Pool Pre-ping**: Ensures connections are alive
-- **Pool Recycle**: Recycles connections after 1 hour
+- **Shared Connection Pooling**: Centralized engine management via `shared/database.py`
+  - Cached engine instance (pool_size=5, max_overflow=10)
+  - Pool pre-ping: Ensures connections are alive
+  - Pool recycle: Recycles connections after 1 hour
+- **BaseRepository Pattern**: Eliminates code duplication and ensures consistent connection usage
 - **Query Performance**: Optimized SELECT queries, removed unnecessary columns
 
 ### Google Drive & Gemini
@@ -270,6 +284,7 @@ proposed_benefit = min(eligible_total, cap_amount)
 - **Fast Decision Retrieval**: GET endpoint for existing decisions (no re-processing)
 - **Automatic Fallback**: Auto-processes from Google Drive if claim not found
 - **Loading States**: Clear feedback during processing
+- **React 19**: Latest React features for improved performance
 
 ## Data Models
 
@@ -302,19 +317,26 @@ proposed_benefit = min(eligible_total, cap_amount)
 
 ## Configuration
 
-### Environment Variables (see `env.example`)
+### Environment Variables (see `.env.example`)
 
 - `GEMINI_API_KEY` - Required for document analysis
-- `GEMINI_MODEL` - gemini-2.5-flash or gemini-2.5-pro
+- `GEMINI_MODEL` - gemini-2.5-flash (default) or gemini-2.5-pro
 - `DATABASE_URL` - PostgreSQL connection string
 - `REDIS_URL` - Redis connection for Celery
-- `GOOGLE_DRIVE_CREDENTIALS` - Path to service account credentials JSON
+- `GOOGLE_DRIVE_CREDENTIALS` - Path to service account credentials JSON (stored in `credentials/` folder)
 - OCR tier configuration (TIER1_ENABLED, TIER2_ENABLED, TIER3_ENABLED)
+- See `.env.example` for complete list of configuration options
 
 ### Frontend Configuration
 
 - `NEXT_PUBLIC_API_URL` - Backend API URL (default: http://localhost:8000/api/v1)
 - Default Google Drive folder ID configured in `DecisionViewer.tsx`
+
+### Credentials Storage
+
+- Credential files are stored in `credentials/` folder (gitignored)
+- `credentials/google-drive-credentials.json` - Google Drive service account
+- `credentials/gen-lang-client-*.json` - Gemini API credentials
 
 ## Testing
 
@@ -324,7 +346,10 @@ proposed_benefit = min(eligible_total, cap_amount)
 - `test_eligibility_classifier.py` - Eligibility tests
 - `test_document_processor.py` - Document processing tests
 - `test_invoice_parser_advanced.py` - Invoice parsing tests
+- `test_claim_902.py` - Specific claim testing
+- `test_code_cleanup.py` - Code quality validation tests
 - Phase tests: `test_phase1_phase2.py`, `test_phase3.py`, `test_phase4.py`, `test_phase5_integration.py`
+- Performance tests: `test_performance.py`, `test_eligibility_performance.py`, `performance_benchmark.py`
 
 ### Running Tests
 
@@ -378,12 +403,27 @@ pytest tests/ --cov=. --cov-report=html
    - Final benefit amount calculation
    - Business rule enforcement
 
-5. **`decision_service/repositories/claim_repository.py`**
+5. **`decision_service/repositories/base_repository.py`**
 
-   - Connection pooling implementation
+   - Base class for all repositories
+   - Shared connection pooling via `shared/database.py`
+   - Common error handling patterns
+   - Row-to-dictionary conversion utilities
+
+6. **`decision_service/repositories/claim_repository.py`**
+
+   - Inherits from BaseRepository
    - Optimized query methods
+   - Claim and decision management
 
-6. **`frontend/app/components/DecisionViewer.tsx`**
+7. **`shared/database.py`**
+
+   - Centralized database connection manager
+   - Cached engine with connection pooling
+   - `get_engine()` function for shared engine access
+   - Row-to-dictionary conversion helpers
+
+8. **`frontend/app/components/DecisionViewer.tsx`**
 
    - Main UI component
    - Line item toggle logic
@@ -391,7 +431,7 @@ pytest tests/ --cov=. --cov-report=html
    - Status override
    - Google Drive auto-processing
 
-7. **`shared/google_drive.py`**
+9. **`shared/google_drive.py`**
 
    - Google Drive API integration
    - File download and folder traversal
@@ -405,9 +445,20 @@ pytest tests/ --cov=. --cov-report=html
 - `docs/ISSUE_ANALYSIS.md` - Known issues analysis
 - `docs/AGENT_ONBOARDING.md` - Comprehensive onboarding guide
 - `docs/USER_OVERRIDE_SYSTEM.md` - User override system documentation
+- `docs/CODE_REVIEW_FINDINGS.md` - Detailed code quality analysis and recommendations
+- `docs/CODE_REVIEW_OVERVIEW.md` - This document
+- `docs/EXECUTIVE_SUMMARY.md` - Executive overview
+- `docs/IMPLEMENTATION_SUMMARY.md` - Implementation details
+- `docs/IMPLEMENTATION_COMPLETE.md` - Implementation completion status
+- `docs/DETERMINISTIC_REDESIGN.md` - Deterministic rules redesign
+- `docs/ROOT_CAUSE_SUMMARY.md` - Root cause analysis
+- `docs/GITHUB_SETUP.md` - GitHub repository setup guide
 - `rules/RULES_GUIDE.md` - Business rules documentation
 - `docs/architecture/` - Architecture Decision Records (ADRs) and C4 diagrams
 - `frontend/README.md` - Frontend setup and usage
+- `frontend/IMPLEMENTATION.md` - Frontend implementation details
+- `sample_invoices/README.md` - Sample invoice documentation
+- `variance/README.md` - Variance analysis documentation
 
 ## Running the System
 
@@ -439,11 +490,16 @@ npm run dev
 docker-compose up
 ```
 
-### Scripts
+### Scripts (`scripts/`)
 
 - `scripts/run_decisions_first_5.py` - Run decisions on claims 900-904
 - `scripts/generate_variance_report.py` - Generate variance reports
+- `scripts/generate_variance_report_enhanced.py` - Enhanced variance reporting
 - `scripts/clear_decisions.py` - Clear decisions for a range of claims
+- `scripts/check_infrastructure.py` - Infrastructure health checks
+- `scripts/setup_github_repo.sh` - GitHub repository setup script
+- Monitoring scripts: `show_decisions.sh`, `show_progress.sh`, `watch_decisions.sh`, `watch_progress.sh`, `watch_workflow.sh`
+- Archive: `scripts/archive/` contains historical scripts and test results
 
 ## Frontend Usage
 
@@ -471,7 +527,27 @@ docker-compose up
 - Every decision stamped with ruleset version
 - Ability to rerun decisions under newer rules for comparison
 
-## Recent Updates
+## Recent Updates & Improvements
+
+### Code Quality Improvements
+
+- **BaseRepository Pattern**: Created `BaseRepository` class to eliminate code duplication across repositories
+- **Shared Database Manager**: Centralized connection pooling via `shared/database.py` with `get_engine()` function
+- **Consistent Connection Usage**: All repositories now use shared connection pool instead of creating individual engines
+- **Row-to-Dict Utilities**: Added helper functions for converting database rows to dictionaries
+
+### Root Directory Cleanup
+
+- **Organized File Structure**:
+  - Created `logs/` folder for all log files
+  - Created `credentials/` folder for credential JSON files
+  - Moved documentation files to `docs/` folder
+  - Moved test files to `tests/` folder
+  - Moved scripts to `scripts/` folder
+  - Removed duplicate `schema.sql` (kept in `database/` folder)
+  - Consolidated `env.example` → `.env.example` (standard convention)
+
+### Feature Updates
 
 - Added frontend UI for decision review and override
 - Implemented Google Drive integration with parallel processing
@@ -481,3 +557,13 @@ docker-compose up
 - Implemented user override storage for rule refinement
 - Added automatic fallback to Google Drive processing
 - Performance optimizations for existing decision retrieval
+
+### Known Areas for Improvement
+
+See `docs/CODE_REVIEW_FINDINGS.md` for detailed analysis of:
+
+- Magic number tuple indexing (should use named access)
+- Complex nested conditionals in update logic
+- Inefficient database query patterns (multiple sequential queries)
+- Import statements inside functions
+- Type safety improvements needed

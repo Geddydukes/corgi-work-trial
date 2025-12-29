@@ -2,34 +2,16 @@ import logging
 from typing import Optional, Dict
 from datetime import datetime
 
+from decision_service.repositories.base_repository import BaseRepository
+from shared.config import Config
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
-# Cache database engine for connection pooling
-_engine_cache = None
 
-def _get_engine():
-    """Get or create a cached database engine with connection pooling."""
-    global _engine_cache
-    from shared.config import Config
-    
-    if _engine_cache is None and Config.DATABASE_URL:
-        from sqlalchemy import create_engine
-        _engine_cache = create_engine(
-            Config.DATABASE_URL,
-            pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=10,
-            pool_recycle=3600
-        )
-    return _engine_cache
-
-
-class ClaimRepository:
+class ClaimRepository(BaseRepository):
     async def get_claim(self, claim_id: int) -> Optional[dict]:
-        from shared.config import Config
-        from sqlalchemy import text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock data")
             return {
                 "id": claim_id,
@@ -40,19 +22,7 @@ class ClaimRepository:
             }
         
         try:
-            engine = _get_engine()
-            if not engine:
-                logger.warning("Database not configured, returning mock data")
-                return {
-                    "id": claim_id,
-                    "claim_tracking_number": f"CLM-2024-{claim_id:06d}",
-                    "claim_amount": 5000.0,
-                    "max_benefit": 5000.0,
-                    "lease_start_date": "2023-01-01",
-                }
-            
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 result = conn.execute(
                     text("""
                         SELECT 
@@ -96,10 +66,7 @@ class ClaimRepository:
             return None
     
     async def get_claim_by_tracking_number(self, tracking_number: str) -> Optional[dict]:
-        from shared.config import Config
-        from sqlalchemy import text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock data")
             return {
                 "id": 12345,
@@ -110,19 +77,7 @@ class ClaimRepository:
             }
         
         try:
-            engine = _get_engine()
-            if not engine:
-                logger.warning("Database not configured, returning mock data")
-                return {
-                    "id": claim_id,
-                    "claim_tracking_number": f"CLM-2024-{claim_id:06d}",
-                    "claim_amount": 5000.0,
-                    "max_benefit": 5000.0,
-                    "lease_start_date": "2023-01-01",
-                }
-            
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 result = conn.execute(
                     text("""
                         SELECT 
@@ -166,11 +121,9 @@ class ClaimRepository:
             return None
     
     async def create_decision(self, decision, user_id: str) -> dict:
-        from shared.config import Config
-        from sqlalchemy import text
         import json
         
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning mock decision")
             return {
                 "id": 1,
@@ -197,27 +150,13 @@ class ClaimRepository:
             }
         
         try:
-            engine = _get_engine()
-            if not engine:
-                logger.warning("Database not configured, returning mock data")
-                return {
-                    "id": claim_id,
-                    "claim_tracking_number": f"CLM-2024-{claim_id:06d}",
-                    "claim_amount": 5000.0,
-                    "max_benefit": 5000.0,
-                    "lease_start_date": "2023-01-01",
-                }
-            
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
-                # Deactivate old decisions for this claim
                 conn.execute(
                     text("UPDATE decisions SET is_active = false WHERE claim_id = :claim_id AND is_active = true"),
                     {"claim_id": decision.claim_id}
                 )
                 
-                # Insert new decision
                 result = conn.execute(
                     text("""
                         INSERT INTO decisions (
@@ -239,7 +178,7 @@ class ClaimRepository:
                         'status': decision.proposed_status,
                         'benefit': float(decision.proposed_benefit_amount),
                         'eligible': float(decision.eligible_total),
-                        'invoice': max(0.0, float(decision.invoice_total)),  # Ensure non-negative for database constraint
+                        'invoice': max(0.0, float(decision.invoice_total)),
                         'cap': float(decision.cap_amount) if decision.cap_amount else None,
                         'approved': json.dumps(decision.approved_line_items, default=str),
                         'ineligible': json.dumps(decision.ineligible_line_items, default=str),
@@ -291,23 +230,14 @@ class ClaimRepository:
     
     async def get_latest_decision_by_tracking_number(self, tracking_number: str) -> Optional[dict]:
         """Get the latest decision for a claim by tracking number."""
-        from shared.config import Config
-        from sqlalchemy import text
         import json
         
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             logger.warning("Database not configured, returning None")
             return None
         
         try:
-            # Use cached engine with connection pooling
-            engine = _get_engine()
-            if not engine:
-                logger.warning("Database not configured, returning None")
-                return None
-            
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
                 result = conn.execute(
                     text("""
@@ -329,7 +259,6 @@ class ClaimRepository:
                 if not result:
                     return None
                 
-                # Get document count from claim_documents table (faster, skip if fails)
                 document_count = 0
                 try:
                     doc_count_result = conn.execute(
@@ -342,7 +271,6 @@ class ClaimRepository:
                     ).fetchone()
                     document_count = doc_count_result[0] if doc_count_result else 0
                 except Exception:
-                    # Table might not exist or query failed, use 0
                     pass
                 
                 # Parse JSON fields efficiently
@@ -412,38 +340,20 @@ class ClaimRepository:
         security_deposit_amount: Optional[float] = None,
     ) -> dict:
         """Create a claim if it doesn't exist, or return existing claim."""
-        from shared.config import Config
-        from sqlalchemy import create_engine, text
-        
-        if not Config.DATABASE_URL:
+        if not self.is_database_configured():
             raise ValueError("Database not configured")
         
         try:
-            engine = _get_engine()
-            if not engine:
-                logger.warning("Database not configured, returning mock data")
-                return {
-                    "id": claim_id,
-                    "claim_tracking_number": f"CLM-2024-{claim_id:06d}",
-                    "claim_amount": 5000.0,
-                    "max_benefit": 5000.0,
-                    "lease_start_date": "2023-01-01",
-                }
-            
-            with engine.connect() as conn:
-                conn.execute(text("SET search_path TO claims, public"))
+            with self.get_connection() as conn:
                 
-                # Check if claim exists
                 existing = conn.execute(
                     text("SELECT id FROM claims WHERE claim_tracking_number = :tracking_number"),
                     {"tracking_number": tracking_number}
                 ).fetchone()
                 
                 if existing:
-                    # Return existing claim
                     return await self.get_claim(existing[0])
                 
-                # Create new claim
                 result = conn.execute(
                     text("""
                         INSERT INTO claims (

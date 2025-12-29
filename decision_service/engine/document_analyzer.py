@@ -6,6 +6,8 @@ import logging
 import json
 from typing import Dict, List, Optional
 from decimal import Decimal
+import google.generativeai as genai
+
 from shared import config
 from decision_service.engine.json_validator import (
     parse_and_validate_line_item_analysis,
