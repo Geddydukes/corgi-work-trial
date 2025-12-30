@@ -1,0 +1,194 @@
+{
+  "config": {
+    "batch_concurrency": 10,
+    "doc_concurrency": 4,
+    "total_claims": 30
+  },
+  "performance": {
+    "total_time": 24.139101028442383,
+    "avg_time": 0,
+    "throughput": 74.56781418160989
+  },
+  "results": [
+    {
+      "tracking": 502,
+      "success": false,
+      "time": 1.5552589893341064,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 500,
+      "success": false,
+      "time": 2.3551769256591797,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 504,
+      "success": false,
+      "time": 3.1312310695648193,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 503,
+      "success": false,
+      "time": 3.847534656524658,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 507,
+      "success": false,
+      "time": 4.6259589195251465,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 505,
+      "success": false,
+      "time": 5.456695079803467,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 508,
+      "success": false,
+      "time": 6.269473075866699,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 510,
+      "success": false,
+      "time": 7.053542137145996,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 509,
+      "success": false,
+      "time": 7.865134000778198,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 511,
+      "success": false,
+      "time": 8.592504024505615,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 512,
+      "success": false,
+      "time": 7.838592052459717,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 513,
+      "success": false,
+      "time": 7.788928031921387,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 514,
+      "success": false,
+      "time": 7.750059127807617,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 515,
+      "success": false,
+      "time": 7.7455668449401855,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 516,
+      "success": false,
+      "time": 7.795295000076294,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 517,
+      "success": false,
+      "time": 7.737947940826416,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 518,
+      "success": false,
+      "time": 7.645375967025757,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 519,
+      "success": false,
+      "time": 7.62385106086731,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 520,
+      "success": false,
+      "time": 7.560173034667969,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 521,
+      "success": false,
+      "time": 7.645387172698975,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 522,
+      "success": false,
+      "time": 7.620676040649414,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 523,
+      "success": false,
+      "time": 7.65362811088562,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 524,
+      "success": false,
+      "time": 7.645162105560303,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 525,
+      "success": false,
+      "time": 7.704995155334473,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 526,
+      "success": false,
+      "time": 7.605226039886475,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 527,
+      "success": false,
+      "time": 7.6251280307769775,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 528,
+      "success": false,
+      "time": 7.62362003326416,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 529,
+      "success": false,
+      "time": 7.614009141921997,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 530,
+      "success": false,
+      "time": 7.644172191619873,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    },
+    {
+      "tracking": 531,
+      "success": false,
+      "time": 7.881598949432373,
+      "error": "HTTP 404: {\"detail\":\"No documents found in Google Drive folder 1Zut8GwH6dNyv-I4zP2n6FI-WnB1d57dv\"}"
+    }
+  ]
+}

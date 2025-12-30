@@ -1,9 +1,18 @@
 """
 Document Analyzer: Uses Gemini 2.5 Pro to analyze documents for denial reasons.
+
+Optimizations:
+- Global semaphore limits concurrent Gemini calls (max 3)
+- Reusable model instance (initialized once)
+- Per-call timeouts and retry with backoff
+- Batch size caps for large document sets
 """
 
 import logging
 import json
+import asyncio
+import threading
+import time
 from typing import Dict, List, Optional
 from decimal import Decimal
 import google.generativeai as genai
@@ -18,12 +27,90 @@ from decision_service.engine.deterministic_rules import apply_deterministic_rule
 
 logger = logging.getLogger(__name__)
 
+# Global semaphore to limit concurrent Gemini API calls across all claims
+# This prevents multiple claims from hammering the API simultaneously
+_GEMINI_SEMAPHORE = threading.Semaphore(3)  # Max 3 concurrent Gemini calls
+_GEMINI_ASYNC_SEMAPHORE = None  # Will be initialized on first use
+
+# Global model instance (reused across calls)
+_GEMINI_MODEL = None
+_GEMINI_MODEL_LOCK = threading.Lock()
+
+
+def _get_gemini_model():
+    """Get or create the shared Gemini model instance."""
+    global _GEMINI_MODEL
+    if _GEMINI_MODEL is None:
+        with _GEMINI_MODEL_LOCK:
+            if _GEMINI_MODEL is None:
+                genai.configure(api_key=config.Config.GEMINI_API_KEY)
+                _GEMINI_MODEL = genai.GenerativeModel("gemini-2.5-flash")
+                logger.info("Initialized shared Gemini model instance")
+    return _GEMINI_MODEL
+
+
+def _call_gemini_with_retry(prompt: str, max_retries: int = 3, timeout_seconds: int = 120) -> str:
+    """
+    Call Gemini API with retry, backoff, and timeout.
+    Uses global semaphore to limit concurrent calls.
+    
+    Args:
+        prompt: The prompt to send
+        max_retries: Maximum retry attempts
+        timeout_seconds: Per-call timeout
+    
+    Returns:
+        Response text
+    """
+    model = _get_gemini_model()
+    
+    for attempt in range(max_retries):
+        try:
+            # Acquire semaphore to limit concurrent API calls
+            acquired = _GEMINI_SEMAPHORE.acquire(timeout=60)
+            if not acquired:
+                raise TimeoutError("Could not acquire Gemini semaphore within 60s")
+            
+            try:
+                # Make the API call with timeout
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        lambda: model.generate_content(prompt).text
+                    )
+                    result = future.result(timeout=timeout_seconds)
+                    return result
+            finally:
+                _GEMINI_SEMAPHORE.release()
+                
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Gemini call timed out after {timeout_seconds}s (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                backoff = 2 ** (attempt + 1)
+                logger.info(f"Retrying in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                raise TimeoutError(f"Gemini call failed after {max_retries} attempts (timeout)")
+                
+        except Exception as e:
+            error_str = str(e)
+            is_retriable = any(x in error_str.lower() for x in ['rate', 'quota', 'timeout', 'unavailable', '503', '429'])
+            
+            if is_retriable and attempt < max_retries - 1:
+                backoff = 2 ** (attempt + 1)
+                logger.warning(f"Gemini error (attempt {attempt + 1}/{max_retries}): {e}, retrying in {backoff}s...")
+                time.sleep(backoff)
+            else:
+                raise
+
 
 class DocumentAnalyzer:
     """Analyzes documents using Gemini 2.5 Pro to identify denial reasons."""
     
     def __init__(self):
         self.version = "v1.0.0"
+        # Pre-warm the model on first DocumentAnalyzer creation
+        _get_gemini_model()
     
     def analyze_document(
         self,
@@ -43,10 +130,6 @@ class DocumentAnalyzer:
             Dict with denial_reasons, is_normal_wear_tear, has_eligible_charges, analysis
         """
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
             
             prompt = f"""Analyze this security deposit claim document to identify potential denial reasons.
 
@@ -80,9 +163,8 @@ RESPONSE FORMAT (JSON only):
     "analysis": "Detailed explanation with evidence from document"
 }}"""
             
-            logger.debug(f"Analyzing document {filename} with Gemini 2.5 Pro...")
-            response = model.generate_content(prompt)
-            response_text = response.text.strip()
+            logger.debug(f"Analyzing document {filename} with Gemini (semaphore-limited)...")
+            response_text = _call_gemini_with_retry(prompt, max_retries=3, timeout_seconds=90)
             
             # Extract JSON from response
             if '```json' in response_text:
@@ -132,10 +214,6 @@ RESPONSE FORMAT (JSON only):
         Bypasses the broken invoice parser.
         """
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            
             prompt = f"""Extract line items from this invoice/statement document.
 
 FILENAME: {filename}
@@ -177,10 +255,8 @@ RESPONSE FORMAT (JSON only):
     "confidence": 0.0-1.0
 }}"""
             
-            logger.info(f"Extracting line items from {filename} with Gemini 2.5 Flash...")
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(prompt)
-            response_text = response.text.strip()
+            logger.info(f"Extracting line items from {filename} (semaphore-limited)...")
+            response_text = _call_gemini_with_retry(prompt, max_retries=3, timeout_seconds=120)
             
             # Extract JSON from response
             if '```json' in response_text:
@@ -218,11 +294,6 @@ RESPONSE FORMAT (JSON only):
             List of line items with added flags
         """
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            
             # Prepare line items for batch analysis
             items_text = "\n".join([
                 f"{i+1}. {item.get('description', 'No description')} - ${item.get('amount', 0):.2f}"
@@ -322,7 +393,7 @@ VALIDATION RULES:
 - Array length must match the number of line items provided ({len(line_items)})
 """
             
-            logger.info(f"Batch analyzing {len(line_items)} line items with Gemini 2.5 Flash...")
+            logger.info(f"Batch analyzing {len(line_items)} line items (semaphore-limited)...")
             
             # Retry LLM call if JSON validation fails
             max_llm_retries = 3
@@ -333,8 +404,7 @@ VALIDATION RULES:
             
             for llm_attempt in range(max_llm_retries):
                 try:
-                    response = model.generate_content(prompt)
-                    response_text = response.text.strip()
+                    response_text = _call_gemini_with_retry(prompt, max_retries=2, timeout_seconds=120)
                     
                     # Use JSON validator with retries for parsing
                     validated_analyses, validation_errors, json_validation_failed = parse_and_validate_line_item_analysis(
@@ -465,11 +535,6 @@ VALIDATION RULES:
             Dict with flags: should_be_included, is_normal_wear_tear, is_covered_by_addendum, confidence, reasoning
         """
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            
             description = line_item.get('description', 'No description')
             amount = line_item.get('amount', 0)
             
@@ -539,8 +604,7 @@ RESPONSE FORMAT (JSON only):
     "addendum_reference": "Quote from addendum if relevant, or 'N/A'"
 }}"""
             
-            response = model.generate_content(prompt)
-            response_text = response.text.strip()
+            response_text = _call_gemini_with_retry(prompt, max_retries=2, timeout_seconds=60)
             
             # Extract JSON from response
             if '```json' in response_text:
@@ -595,7 +659,7 @@ RESPONSE FORMAT (JSON only):
             return {
                 'should_be_included': should_include,
                 'is_normal_wear_tear': result.get('is_normal_wear_tear', False),
-                'is_covered_by_addendum': result.get('is_covered_by_addendum', False),
+                'is_covered_by_addendum': result.get('is_covered_by_addendum', True),
                 'is_covered_by_other_insurance': is_covered_by_other_insurance,
                 'confidence': float(result.get('confidence', 0.5)),
                 'reasoning': result.get('reasoning', 'No reasoning provided'),
@@ -607,7 +671,7 @@ RESPONSE FORMAT (JSON only):
             return {
                 'should_be_included': False,
                 'is_normal_wear_tear': False,
-                'is_covered_by_addendum': False,
+                'is_covered_by_addendum': True,
                 'confidence': 0.0,
                 'reasoning': f'Analysis error: {str(e)}',
                 'addendum_reference': 'N/A'
@@ -628,11 +692,6 @@ RESPONSE FORMAT (JSON only):
             Aggregated analysis with combined denial reasons and flags
         """
         try:
-            import google.generativeai as genai
-            
-            genai.configure(api_key=config.Config.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            
             # Prepare document summaries for batch analysis
             document_summaries = []
             for doc in documents:
@@ -702,9 +761,8 @@ RESPONSE FORMAT (JSON only):
     }}
 }}"""
             
-            logger.info(f"Batch analyzing {len(document_summaries)} documents with Gemini 2.5 Pro...")
-            response = model.generate_content(prompt)
-            response_text = response.text.strip()
+            logger.info(f"Batch analyzing {len(document_summaries)} documents (semaphore-limited)...")
+            response_text = _call_gemini_with_retry(prompt, max_retries=2, timeout_seconds=120)
             
             # Extract JSON from response
             if '```json' in response_text:
@@ -808,4 +866,3 @@ RESPONSE FORMAT (JSON only):
             Aggregated analysis with combined denial reasons and flags
         """
         return self.analyze_all_documents_batch(documents)
-

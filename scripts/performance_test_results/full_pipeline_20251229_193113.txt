@@ -1,0 +1,53 @@
+================================================================================
+FULL PIPELINE PERFORMANCE REPORT
+Google Drive → OCR → Document Classification → Decision Engine
+================================================================================
+Generated: 2025-12-29 19:31:13
+
+CONFIGURATION
+----------------------------------------
+Batch concurrency: 10 claims in parallel
+Document download concurrency: 4 per claim
+LLM: Gemini 2.5 Flash
+
+PERFORMANCE METRICS
+----------------------------------------
+Total Claims: 30
+Successful: 0
+Failed: 30
+Success Rate: 0.0%
+
+Total Wall Clock Time: 0.1s (0.0 min)
+Average Time per Claim: 0.0s
+Min/Max Time: 0.0s / 0.0s
+Throughput: 19129.4 claims/min
+
+DECISION ACCURACY
+----------------------------------------
+
+OPTIMIZATION COMPARISON
+----------------------------------------
+Before optimizations:
+  - Batch concurrency: 2
+  - Doc downloads: 2 concurrent
+  - Avg time: ~53s per claim
+  - Throughput: ~1.1 claims/min
+
+After optimizations:
+  - Batch concurrency: 10
+  - Doc downloads: 4 concurrent
+  - Avg time: 0.0s per claim
+  - Throughput: 19129.4 claims/min
+
+FAILURES
+----------------------------------------
+  Claim 507: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 500: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 505: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 503: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 504: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 502: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 508: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 511: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 509: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_
+  Claim 510: HTTP 422: {"detail":[{"type":"missing","loc":["body","drive_

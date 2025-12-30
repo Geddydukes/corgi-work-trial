@@ -65,6 +65,13 @@ class GoogleDriveService:
         self._drive_service = None
         self._lock = threading.Lock()  # Per-instance lock for thread-safe service access
     
+    def reset_service(self):
+        """Reset the Drive service to force fresh connections (helps with SSL pool issues)."""
+        with self._lock:
+            self._drive_service = None
+            self._service = None
+            logger.info("Drive service reset - next call will create fresh connection")
+    
     def _get_service(self):
         """Get authenticated Google Drive service (thread-safe)."""
         # Double-check locking pattern for thread safety
@@ -213,20 +220,156 @@ class GoogleDriveService:
         logger.info(f"Found {len(files)} files in folder {folder_id}")
         return files
     
-    def download_file_to_stream(self, file_id: str) -> Tuple[io.BytesIO, str, str]:
+    def batch_get_metadata(self, file_ids: List[str]) -> Dict[str, Dict]:
+        """
+        Batch fetch metadata for multiple files in a single API call.
+        Reduces connection overhead compared to individual requests.
+        
+        Args:
+            file_ids: List of Google Drive file IDs
+        
+        Returns:
+            Dict mapping file_id -> metadata dict
+        """
+        if not file_ids:
+            return {}
+        
+        service = self._get_service()
+        results = {}
+        
+        try:
+            from googleapiclient.http import BatchHttpRequest
+            import time as time_module
+            
+            def callback(request_id, response, exception):
+                if exception:
+                    logger.warning(f"Batch metadata error for {request_id}: {exception}")
+                    results[request_id] = None
+                else:
+                    results[request_id] = response
+            
+            # Process in batches of 100 (Drive API limit)
+            for i in range(0, len(file_ids), 100):
+                batch = service.new_batch_http_request(callback=callback)
+                batch_ids = file_ids[i:i+100]
+                
+                for file_id in batch_ids:
+                    batch.add(
+                        service.files().get(fileId=file_id, fields="id,name,mimeType,size"),
+                        request_id=file_id
+                    )
+                
+                # Execute with retry
+                retries = 0
+                max_retries = 3
+                while retries < max_retries:
+                    try:
+                        batch.execute()
+                        break
+                    except Exception as e:
+                        retries += 1
+                        if retries >= max_retries:
+                            logger.error(f"Batch metadata failed after {max_retries} retries: {e}")
+                            raise
+                        delay = 2 ** retries
+                        logger.warning(f"Batch metadata error (attempt {retries}/{max_retries}): {e}, retrying in {delay}s...")
+                        time_module.sleep(delay)
+            
+            logger.info(f"Batch fetched metadata for {len([r for r in results.values() if r])} / {len(file_ids)} files")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in batch metadata fetch: {e}")
+            return {}
+    
+    def download_files_sequential(self, file_ids: List[str], delay_between: float = 0.5) -> List[Tuple[str, io.BytesIO, str, str]]:
+        """
+        Download multiple files sequentially with delay between each.
+        More reliable than parallel downloads under load.
+        
+        Args:
+            file_ids: List of file IDs to download
+            delay_between: Seconds to wait between downloads
+        
+        Returns:
+            List of (file_id, stream, filename, mime_type) tuples
+        """
+        import time as time_module
+        
+        # First, batch fetch all metadata
+        metadata = self.batch_get_metadata(file_ids)
+        
+        results = []
+        for i, file_id in enumerate(file_ids):
+            try:
+                meta = metadata.get(file_id)
+                if not meta:
+                    logger.warning(f"No metadata for file {file_id}, skipping")
+                    continue
+                
+                filename = meta.get('name', 'unknown')
+                mime_type = meta.get('mimeType', '')
+                
+                # Download the file
+                stream, _, _ = self.download_file_to_stream(file_id)
+                results.append((file_id, stream, filename, mime_type))
+                
+                # Delay between downloads to avoid connection pool exhaustion
+                if i < len(file_ids) - 1 and delay_between > 0:
+                    time_module.sleep(delay_between)
+                    
+            except Exception as e:
+                logger.error(f"Failed to download file {file_id}: {e}")
+                continue
+        
+        logger.info(f"Downloaded {len(results)} / {len(file_ids)} files")
+        return results
+    
+    def download_file_to_stream(self, file_id: str, cached_metadata: Optional[Dict] = None) -> Tuple[io.BytesIO, str, str]:
         """
         Download a file from Google Drive to a BytesIO stream.
         
         Args:
             file_id: Google Drive file ID
+            cached_metadata: Optional pre-fetched metadata (from batch_get_metadata)
         
         Returns:
             Tuple of (BytesIO stream, filename, mime_type)
         """
+        import time as time_module
         service = self._get_service()
         
         try:
-            file_metadata = service.files().get(fileId=file_id).execute()
+            # Use cached metadata if provided, otherwise fetch with retry
+            if cached_metadata:
+                file_metadata = cached_metadata
+                logger.debug(f"Using cached metadata for file {file_id}")
+            else:
+                # Retry wrapper for metadata GET (fixes TLS/socket issues under load)
+                metadata_retries = 0
+                max_metadata_retries = 3
+                file_metadata = None
+                
+                while metadata_retries < max_metadata_retries:
+                    try:
+                        file_metadata = service.files().get(
+                            fileId=file_id,
+                            fields="id,name,mimeType,size"
+                        ).execute()
+                        break  # Success
+                    except Exception as e:
+                        metadata_retries += 1
+                        error_str = str(e)
+                        is_retriable = any(x in error_str for x in ['SSL', 'ssl', 'ResponseNotReady', 'Connection', 'socket'])
+                        
+                        if metadata_retries >= max_metadata_retries or not is_retriable:
+                            logger.error(f"Failed to get metadata for file {file_id} after {metadata_retries} attempts: {e}")
+                            raise
+                        
+                        delay = 2 ** metadata_retries  # Exponential backoff: 2, 4, 8 seconds
+                        logger.warning(f"Metadata GET failed for {file_id} (attempt {metadata_retries}/{max_metadata_retries}): {e}, retrying in {delay}s...")
+                        time_module.sleep(delay)
+            
             filename = file_metadata.get('name', 'unknown')
             mime_type = file_metadata.get('mimeType', '')
             

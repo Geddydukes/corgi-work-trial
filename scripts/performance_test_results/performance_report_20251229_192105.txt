@@ -1,0 +1,27 @@
+================================================================================
+PERFORMANCE REPORT
+================================================================================
+Generated: 2025-12-29 19:21:05
+
+BATCH PROCESSING METRICS
+----------------------------------------
+Total Claims: 18
+Successful: 18
+Failed: 0
+Success Rate: 100.0%
+
+Total Processing Time: 965.2s (16.1 min)
+Average Time per Claim: 53.6s
+Throughput: 1.1 claims/min
+
+DECISION QUALITY METRICS
+----------------------------------------
+Status Accuracy: 77.8%
+Mean Absolute Error: $1,333.60
+
+RECOMMENDATIONS FOR OPTIMIZATION
+----------------------------------------
+⚠️  Average time > 30s per claim - consider:
+   - Increase batch concurrency (currently 5)
+   - Check for slow database queries
+   - Verify LLM caching is working

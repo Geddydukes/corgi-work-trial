@@ -1,0 +1,109 @@
+====================================================================================================
+VARIANCE COMPARISON REPORT: Claims 900-910
+====================================================================================================
+Generated: 2025-12-29 17:29:53
+
+====================================================================================================
+NEW RUN (Lenient System) - Summary
+====================================================================================================
+Total Claims: 11
+Status Accuracy: 72.73% (8/11)
+Average Proposed Amount: $572.73
+Average Actual Amount: $1,254.25
+Mean Absolute Error: $565.40
+
+====================================================================================================
+PREVIOUS RUN - Summary
+====================================================================================================
+Total Claims: 5
+Status Accuracy: 80.00%
+Average Proposed Amount: $1,500.00
+Average Actual Amount: $640.00
+Mean Absolute Error: $860.00
+
+====================================================================================================
+COMPARISON
+====================================================================================================
+Status Accuracy Change: -7.27% (72.73% vs 80.00%)
+Mean Absolute Error Change: $-294.60 ($565.40 vs $860.00)
+Average Proposed Amount Change: $-927.27 ($572.73 vs $1,500.00)
+
+====================================================================================================
+DETAILED RESULTS (New Run)
+====================================================================================================
+
+Claim 900 (ID: 3388):
+  Proposed: APPROVE $258.00
+  Actual:   DENY $0.00 ❌
+  Confidence: 55.2%
+  Approved Items: 4
+
+Claim 901 (ID: 3389):
+  Proposed: APPROVE $770.00
+  Actual:   APPROVE $770.00 ✅
+  Difference: $0.00
+  Confidence: 55.2%
+  Approved Items: 5
+
+Claim 902 (ID: 3390):
+  Proposed: APPROVE $113.00
+  Actual:   APPROVE $100.00 ✅
+  Difference: $13.00
+  Confidence: 55.2%
+  Approved Items: 4
+
+Claim 903 (ID: 3391):
+  Proposed: APPROVE $263.00
+  Actual:   APPROVE $190.00 ✅
+  Difference: $73.00
+  Confidence: 55.2%
+  Approved Items: 6
+
+Claim 904 (ID: 3392):
+  Proposed: APPROVE $494.00
+  Actual:   APPROVE $1,500.00 ✅
+  Difference: $1,006.00
+  Confidence: 55.2%
+  Approved Items: 8
+
+Claim 905 (ID: 3393):
+  Proposed: APPROVE $1,019.00
+  Actual:   APPROVE $274.00 ✅
+  Difference: $745.00
+  Confidence: 50.0%
+  Approved Items: 4
+
+Claim 906 (ID: 3394):
+  Proposed: APPROVE $1,500.00
+  Actual:   APPROVE $1,500.00 ✅
+  Difference: $0.00
+  Confidence: 50.0%
+  Approved Items: 9
+
+Claim 907 (ID: 3395):
+  Proposed: APPROVE $1,500.00
+  Actual:   APPROVE $1,500.00 ✅
+  Difference: $0.00
+  Confidence: 50.0%
+  Approved Items: 6
+
+Claim 908 (ID: 3396):
+  Proposed: APPROVE $383.00
+  Actual:   APPROVE $1,500.00 ✅
+  Difference: $1,117.00
+  Confidence: 50.0%
+  Approved Items: 7
+
+Claim 909 (ID: 3397):
+  Proposed: DENY $0.00
+  Actual:   APPROVE $200.00 ❌
+  Difference: $200.00
+  Confidence: 100.0%
+  Approved Items: 0
+
+Claim 910 (ID: 3398):
+  Proposed: DENY $0.00
+  Actual:   APPROVE $2,500.00 ❌
+  Difference: $2,500.00
+  Confidence: 100.0%
+  Approved Items: 0

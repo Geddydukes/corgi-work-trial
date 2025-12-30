@@ -1,4 +1,5 @@
 """Main document processing pipeline orchestrator."""
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -161,18 +162,13 @@ class DocumentProcessor:
                 filename=file_metadata.original_filename,
             )
             
-            # Escalate to Tier 3 OCR if:
-            # 1. Classification is UNKNOWN (regardless of confidence)
-            # 2. Classification confidence is too low (< 75%)
-            # 3. OCR confidence is below 85%
-            from shared.models import DocumentType
-            
-            is_unknown = classification.document_type == DocumentType.UNKNOWN
-            low_classification_confidence = classification.confidence < config.Config.CLASSIFICATION_CONFIDENCE_THRESHOLD
-            low_ocr_confidence = best_extraction.confidence < 85.0
+            # Escalate to Tier 3 OCR only if OCR confidence is too low
+            # Disabled for classification purposes (UNKNOWN type or low classification confidence)
+            # to speed up processing - classification doesn't affect line item extraction
+            low_ocr_confidence = best_extraction.confidence < 70.0  # Lower threshold for speed
             
             should_escalate = (
-                (is_unknown or low_classification_confidence or low_ocr_confidence) and
+                low_ocr_confidence and
                 not force_high_quality and 
                 config.Config.OCR_TIER3_ENABLED
             )
@@ -184,21 +180,9 @@ class DocumentProcessor:
             )
             
             if should_escalate and not already_tier3:
-                escalation_reason = []
-                if is_unknown:
-                    escalation_reason.append("document classified as UNKNOWN")
-                if low_classification_confidence:
-                    escalation_reason.append(f"low classification confidence ({classification.confidence*100:.1f}%)")
-                if low_ocr_confidence:
-                    escalation_reason.append(f"low OCR confidence ({best_extraction.confidence:.1f}%)")
-                
                 logger.warning(
-                    f"Escalating to Tier 3 OCR: {', '.join(escalation_reason)} "
+                    f"Escalating to Tier 3 OCR: low OCR confidence ({best_extraction.confidence:.1f}%) "
                     f"(current tier: {best_extraction.tier_used.value if best_extraction.tier_used else 'none'})"
-                )
-                logger.warning(
-                    f"Low classification confidence ({classification.confidence*100:.1f}%) "
-                    f"with {best_extraction.tier_used.value}, retrying with Tier 3 OCR"
                 )
                 # Retry with Tier 3
                 tier3_attempts, tier3_best = self.ocr_service.extract_with_attempts(
@@ -615,4 +599,3 @@ class DocumentProcessor:
             requires_manual_review=True,
             manual_review_reasons=["Processing failed"],
         )
-

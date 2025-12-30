@@ -43,7 +43,7 @@ class ClaimRepository(BaseRepository):
                 return {
                     "id": result[0],
                     "claim_tracking_number": result[1],
-                    "claim_amount": float(result[2]) if result[2] else 0.0,
+                    "claim_amount": float(result[2]) if result[2] is not None else None,
                     "max_benefit": float(result[3]) if result[3] else None,
                     "security_deposit_amount": float(result[4]) if result[4] else None,
                     "policyholder_id": result[5],
@@ -98,7 +98,7 @@ class ClaimRepository(BaseRepository):
                 return {
                     "id": result[0],
                     "claim_tracking_number": result[1],
-                    "claim_amount": float(result[2]) if result[2] else 0.0,
+                    "claim_amount": float(result[2]) if result[2] is not None else None,
                     "max_benefit": float(result[3]) if result[3] else None,
                     "security_deposit_amount": float(result[4]) if result[4] else None,
                     "policyholder_id": result[5],
@@ -358,7 +358,7 @@ class ClaimRepository(BaseRepository):
                             "eligible_total": float(result[7]),
                             "invoice_total": float(result[8]),
                             "cap_amount": float(result[9]) if result[9] else None,
-                            "claim_amount": float(claim_result[1]) if claim_result[1] else 0.0,
+                            "claim_amount": float(claim_result[1]) if claim_result[1] is not None else None,
                             "max_benefit": float(claim_result[2]) if claim_result[2] else None,
                             "document_count": document_count,
                             "line_item_count": line_item_count,

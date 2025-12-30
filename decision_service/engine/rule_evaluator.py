@@ -1,5 +1,7 @@
 import logging
 from decimal import Decimal
+
+from shared.config import Config
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -83,21 +85,8 @@ class RuleEvaluator:
                     "confidence": 100.0
                 }
         
-        claim_amount = Decimal(str(claim.get("claim_amount", 0)))
-        
-        if claim_amount == 0:
-            return {
-                "status": "approve",
-                "benefit_amount": Decimal("0"),
-                "cap_amount": None,
-                "flags": {"critical": [], "warnings": [], "info": ["claim_amount_zero"]},
-                "missing_data": {"fields": [], "needs_user_input": False},
-                "reasoning": {
-                    "reason": "Claim amount is zero, approving with zero benefit",
-                    "rule_version": self.version
-                },
-                "confidence": 100.0
-            }
+        claim_amount_raw = claim.get("claim_amount")
+        claim_amount = Decimal(str(claim_amount_raw)) if claim_amount_raw is not None else None
         
         max_benefit_raw = claim.get("max_benefit")
         if max_benefit_raw is None or max_benefit_raw == "":
@@ -142,14 +131,32 @@ class RuleEvaluator:
                     "confidence": 100.0
                 }
         
-        max_benefit = override_max_benefit or Decimal(str(max_benefit_raw))
+        max_benefit = override_max_benefit or (Decimal(str(max_benefit_raw)) if max_benefit_raw is not None else None)
+        
+        # Handle case where claim_amount is explicitly 0 (not NULL)
+        # If claim_amount is 0 and no max_benefit, approve $0
+        # If claim_amount is NULL/None, treat as "no cap" and use max_benefit only
+        if claim_amount == 0 and max_benefit is None:
+            return {
+                "status": "approve",
+                "benefit_amount": Decimal("0"),
+                "cap_amount": None,
+                "flags": {"critical": [], "warnings": [], "info": ["claim_amount_zero"]},
+                "missing_data": {"fields": [], "needs_user_input": False},
+                "reasoning": {
+                    "reason": "Claim amount is zero and no max_benefit, approving with zero benefit",
+                    "rule_version": self.version
+                },
+                "confidence": 100.0
+            }
         
         # Never approve more than min(claim_amount, max_benefit)
-        if claim_amount > 0 and max_benefit > 0:
+        # If claim_amount is None, only use max_benefit as cap
+        if claim_amount is not None and claim_amount > 0 and max_benefit is not None and max_benefit > 0:
             effective_cap = min(claim_amount, max_benefit)
-        elif claim_amount > 0:
+        elif claim_amount is not None and claim_amount > 0:
             effective_cap = claim_amount
-        elif max_benefit > 0:
+        elif max_benefit is not None and max_benefit > 0:
             effective_cap = max_benefit
         else:
             effective_cap = None
@@ -165,11 +172,13 @@ class RuleEvaluator:
             invoice_total = Decimal("0")
             flags["warnings"].append("invoice_total_negative_set_to_zero")
         
-        # Sanity check: invoice_total should not exceed claim_amount by more than 50%
+        # Sanity check: invoice_total should not exceed claim_amount by configurable multiplier
         # This catches data corruption (e.g., Claim 901 with billions)
-        if invoice_total > claim_amount * Decimal("1.5") and claim_amount > 0:
-            logger.warning(f"Invoice total ${invoice_total} exceeds claim_amount ${claim_amount} by >50%, applying sanity cap")
-            invoice_total = claim_amount * Decimal("1.5")
+        # Only apply if claim_amount is set (not NULL)
+        invoice_claim_multiplier = Decimal(str(Config.INVOICE_TO_CLAIM_SANITY_MULTIPLIER))
+        if claim_amount is not None and invoice_total > claim_amount * invoice_claim_multiplier and claim_amount > 0:
+            logger.warning(f"Invoice total ${invoice_total} exceeds claim_amount ${claim_amount} by multiplier>{invoice_claim_multiplier}, applying sanity cap")
+            invoice_total = claim_amount * invoice_claim_multiplier
             flags["warnings"].append(f"invoice_total_sanity_check_applied: capped to ${invoice_total}")
         
         # DETERMINISTIC CAP CALCULATION (monotonic in max_benefit)
@@ -263,4 +272,3 @@ class RuleEvaluator:
             "Missing lease start date": "Lease start date is missing"
         }
         return explanations.get(flag, f"Flag: {flag}")
-

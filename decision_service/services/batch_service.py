@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
@@ -110,17 +111,19 @@ class BatchService:
         try:
             from decision_service.repositories.claim_repository import ClaimRepository
             from decision_service.engine.decision_engine import DecisionEngine
-            import asyncio
             
             claim_repo = ClaimRepository()
             engine = DecisionEngine()
+            errors_summary: List[str] = []
             
             logger.info(f"Starting batch processing for batch {batch_id} with {len(claim_ids)} claims")
             
             # Process claims with controlled concurrency to avoid overwhelming the server
             # Use semaphore to limit concurrent evaluations (each can be CPU/API intensive)
-            # Using 2 concurrent to balance speed with stability (avoiding connection pool issues)
-            MAX_CONCURRENT = 2  # Process up to 2 claims concurrently for stability
+            # With global Gemini semaphore (max 3 concurrent API calls in document_analyzer.py),
+            # we can safely process more claims concurrently - they'll queue for Gemini access
+            # Setting to 5 balances throughput with stability for Drive operations
+            MAX_CONCURRENT = 5  # Process up to 5 claims concurrently (Gemini has its own limit)
             semaphore = asyncio.Semaphore(MAX_CONCURRENT)
             
             async def process_single_claim(claim_id: int):
@@ -146,24 +149,56 @@ class BatchService:
                                 batch_id,
                                 claim_id,
                                 'failed',
-                                error_message="Claim has no documents - cannot evaluate"
+                                error_message="Claim has no documents. Please upload a move-out statement or invoice and retry."
                             )
                             return  # Skip this claim
                         
                         logger.info(f"Claim {claim_id} has {len(documents)} documents, proceeding with evaluation")
-                        decision = await engine.evaluate_claim(claim_id=claim_id)
                         
-                        # Log decision details for debugging
-                        logger.info(f"Claim {claim_id} decision: status={decision.proposed_status}, amount=${decision.proposed_benefit_amount}, line_items={decision.line_item_count}")
+                        max_attempts = 3
+                        backoff_seconds = 1.0
+                        last_error: Optional[Exception] = None
+                        for attempt in range(1, max_attempts + 1):
+                            try:
+                                logger.info(f"Evaluating claim {claim_id} (attempt {attempt}/{max_attempts})")
+                                decision = await engine.evaluate_claim(claim_id=claim_id)
+                                
+                                # Log decision details for debugging
+                                logger.info(f"Claim {claim_id} decision: status={decision.proposed_status}, amount=${decision.proposed_benefit_amount}, line_items={decision.line_item_count}")
+                                
+                                await claim_repo.create_decision(decision, user_id="system")
+                                
+                                # Update status to completed
+                                await self.batch_repository.update_batch_status(batch_id, claim_id, 'completed')
+                                
+                                logger.info(f"Processed claim {claim_id} in batch {batch_id}")
+                                return
+                            except (asyncio.TimeoutError, ConnectionError) as transient_error:
+                                last_error = transient_error
+                                if attempt < max_attempts:
+                                    logger.warning(f"Transient error processing claim {claim_id} (attempt {attempt}/{max_attempts}): {transient_error}. Retrying after {backoff_seconds}s")
+                                    await asyncio.sleep(backoff_seconds)
+                                    backoff_seconds *= 2
+                                    continue
+                                logger.error(f"Transient error processing claim {claim_id} after retries: {transient_error}", exc_info=True)
+                            except Exception as e:
+                                last_error = e
+                                logger.error(f"Error processing claim {claim_id} in batch {batch_id}: {e}", exc_info=True)
+                                break
                         
-                        await claim_repo.create_decision(decision, user_id="system")
-                        
-                        # Update status to completed
-                        await self.batch_repository.update_batch_status(batch_id, claim_id, 'completed')
-                        
-                        logger.info(f"Processed claim {claim_id} in batch {batch_id}")
+                        # Only reach here on failure after retries
+                        friendly_message = "We could not evaluate this claim automatically. Please re-upload documents or retry shortly."
+                        details = f"{friendly_message} Last error: {last_error}"
+                        errors_summary.append(f"claim {claim_id}: {last_error}")
+                        await self.batch_repository.update_batch_status(
+                            batch_id, 
+                            claim_id, 
+                            'failed',
+                            error_message=details
+                        )
                     except Exception as e:
                         logger.error(f"Error processing claim {claim_id} in batch {batch_id}: {e}", exc_info=True)
+                        errors_summary.append(f"claim {claim_id}: {e}")
                         try:
                             await self.batch_repository.update_batch_status(
                                 batch_id, 
@@ -178,6 +213,11 @@ class BatchService:
             tasks = [process_single_claim(claim_id) for claim_id in claim_ids]
             await asyncio.gather(*tasks, return_exceptions=True)
             
+            if errors_summary:
+                logger.warning(f"Batch {batch_id} completed with {len(errors_summary)} failures: {errors_summary}")
+            else:
+                logger.info(f"Batch {batch_id} completed without errors")
+            
             logger.info(f"Completed batch processing for batch {batch_id}")
         except Exception as e:
             logger.error(f"Critical error in batch processing for batch {batch_id}: {e}", exc_info=True)
@@ -190,9 +230,6 @@ class BatchService:
             return None
         
         return batch_job
-
-
-
 
 
 

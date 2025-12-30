@@ -439,6 +439,54 @@ async def process_claim_from_drive(
     
     logger.info(f"[{request_id}] Found {len(drive_files)} files in Google Drive folder")
     
+    # Priority keywords for relevant documents
+    PRIORITY_KEYWORDS = ("addendum", "move-out", "move out", "moveout", "invoice", "itemization", "final statement")
+    # Secondary keywords (less priority but still useful)
+    SECONDARY_KEYWORDS = ("statement", "charges", "deposit")
+    # Keywords to explicitly skip (reduce load - these are large documents with minimal value)
+    # - ledger: Long transaction history, not needed for line item extraction
+    # - application: Rental application, not relevant to deposit claims
+    # - lease: Large (20+ pages), lease_text is optional for improper notice check
+    # - id/license/identification: ID documents, not relevant
+    SKIP_KEYWORDS = ("ledger", "application", "lease", "id", "license", "identification")
+    
+    # First pass: priority documents only
+    priority_files = [
+        f for f in drive_files
+        if f.mime_type == "application/pdf" 
+        and any(k in f.name.lower() for k in PRIORITY_KEYWORDS)
+        and not any(k in f.name.lower() for k in SKIP_KEYWORDS)
+    ]
+    
+    if priority_files:
+        logger.info(f"[{request_id}] Filtered to {len(priority_files)} priority documents (addendum/invoice/move-out/itemization)")
+        drive_files = priority_files
+    else:
+        # Second pass: include secondary documents
+        secondary_files = [
+            f for f in drive_files
+            if f.mime_type == "application/pdf"
+            and any(k in f.name.lower() for k in SECONDARY_KEYWORDS)
+            and not any(k in f.name.lower() for k in SKIP_KEYWORDS)
+        ]
+        
+        if secondary_files:
+            logger.info(f"[{request_id}] Filtered to {len(secondary_files)} secondary documents (statement/charges/deposit)")
+            drive_files = secondary_files
+        else:
+            # Final fallback: all PDFs except skip keywords, capped at 5 files
+            fallback_files = [
+                f for f in drive_files
+                if f.mime_type == "application/pdf"
+                and not any(k in f.name.lower() for k in SKIP_KEYWORDS)
+            ][:5]  # Cap at 5 to reduce load
+            
+            if fallback_files:
+                logger.warning(f"[{request_id}] No keyword matches, using {len(fallback_files)} PDFs (capped at 5)")
+                drive_files = fallback_files
+            else:
+                logger.warning(f"[{request_id}] No relevant files found after filtering")
+    
     step_start = time.time()
     doc_processor = DocumentProcessor()
     engine = get_engine()
@@ -446,7 +494,7 @@ async def process_claim_from_drive(
         raise HTTPException(status_code=500, detail="Database engine not available")
     logger.info(f"[{request_id}] DocumentProcessor and engine setup took {time.time() - step_start:.2f}s")
     
-    async def process_single_document(drive_file):
+    async def process_single_document(drive_file, cached_meta=None):
         """Process a single document from Google Drive."""
         doc_start = time.time()
         doc_id = f"{request_id}-{drive_file.id}"
@@ -455,12 +503,12 @@ async def process_claim_from_drive(
             download_start = time.time()
             
             loop = asyncio.get_event_loop()
+            # Use cached metadata if available to skip metadata API call
             file_stream, filename, mime_type = await loop.run_in_executor(
                 None,
-                drive_service.download_file_to_stream,
-                drive_file.id
+                lambda: drive_service.download_file_to_stream(drive_file.id, cached_metadata=cached_meta)
             )
-            logger.info(f"[{doc_id}] Download took {time.time() - download_start:.2f}s")
+            logger.info(f"[{doc_id}] Download took {time.time() - download_start:.2f}s (metadata cached: {cached_meta is not None})")
             
             hash_start = time.time()
             file_content = file_stream.read()
@@ -543,19 +591,34 @@ async def process_claim_from_drive(
             return None
     
     step_start = time.time()
-    # Reduced concurrency to 2 to avoid SSL connection pool exhaustion
-    # SSL errors occur when too many concurrent connections are made to Google Drive
-    logger.info(f"[{request_id}] Processing {len(drive_files)} documents in parallel (max 2 concurrent)...")
-    semaphore = asyncio.Semaphore(2)
     
-    async def process_with_semaphore(drive_file):
-        async with semaphore:
-            logger.info(f"[{request_id}] Starting parallel processing of: {drive_file.name}")
-            return await process_single_document(drive_file)
+    # OPTIMIZATION: Batch fetch metadata first to reduce API calls
+    file_ids = [f.id for f in drive_files]
+    logger.info(f"[{request_id}] Batch fetching metadata for {len(file_ids)} files...")
     
-    # Process all documents in parallel with semaphore limiting concurrency
-    logger.info(f"[{request_id}] Launching {len(drive_files)} parallel document processing tasks...")
-    results = await asyncio.gather(*[process_with_semaphore(f) for f in drive_files], return_exceptions=True)
+    loop = asyncio.get_event_loop()
+    metadata_cache = await loop.run_in_executor(
+        None,
+        drive_service.batch_get_metadata,
+        file_ids
+    )
+    logger.info(f"[{request_id}] Batch metadata fetch completed in {time.time() - step_start:.2f}s")
+    
+    # Process documents sequentially with small delay to avoid SSL pool exhaustion
+    # This is more reliable than parallel processing under load
+    logger.info(f"[{request_id}] Processing {len(drive_files)} documents (sequential with 0.3s delay)...")
+    
+    results = []
+    for i, drive_file in enumerate(drive_files):
+        logger.info(f"[{request_id}] Processing document {i+1}/{len(drive_files)}: {drive_file.name}")
+        # Pass cached metadata to avoid redundant API calls
+        cached_meta = metadata_cache.get(drive_file.id)
+        result = await process_single_document(drive_file, cached_meta=cached_meta)
+        results.append(result)
+        
+        # Small delay between downloads to avoid connection pool issues
+        if i < len(drive_files) - 1:
+            await asyncio.sleep(0.3)
     processed_count = sum(1 for r in results if r is True)
     
     for i, result in enumerate(results):

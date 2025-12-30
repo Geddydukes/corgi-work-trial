@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   batchEvaluate, 
   getBatchStatus, 
   batchProcessFromDrive,
   getDecision,
+  processFromDrive,
   DecisionResponse,
   BatchEvaluationRequest,
   BatchStatusResponse
 } from '@/lib/api';
 import VarianceTracker from './VarianceTracker';
 
-const DEFAULT_DRIVE_FOLDER_ID = '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
+const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
 
 interface BatchItem {
   id: string;
@@ -29,12 +30,21 @@ interface BatchProcessorProps {
 }
 
 export default function BatchProcessor({ initialInput = '' }: BatchProcessorProps) {
+  const isDev = process.env.NODE_ENV === 'development';
   const [input, setInput] = useState(initialInput);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [processing, setProcessing] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatusResponse | null>(null);
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
+  const backendCheckController = useRef<AbortController | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const getBaseUrl = () => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    return apiUrl.replace('/api/v1', '');
+  };
   
   useEffect(() => {
     if (initialInput) {
@@ -44,12 +54,13 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
 
   useEffect(() => {
     const checkBackend = async () => {
+      backendCheckController.current?.abort();
+      const controller = new AbortController();
+      backendCheckController.current = controller;
       try {
-        // Increased timeout to 5s, but also reduce frequency when processing
-        // Health check every 30 seconds (was 10s) to avoid overwhelming server during batch processing
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/health`, {
+        const response = await fetch(`${getBaseUrl()}/health`, {
           method: 'GET',
-          signal: AbortSignal.timeout(5000),
+          signal: controller.signal,
         });
         setBackendConnected(response.ok);
       } catch (error) {
@@ -57,32 +68,42 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
       }
     };
     checkBackend();
-    // Reduced frequency from 10s to 30s to avoid overwhelming server during batch processing
     const interval = setInterval(checkBackend, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      backendCheckController.current?.abort();
+    };
   }, []);
 
-  const parseInput = useCallback((input: string): { type: 'tracking' | 'claim_id', values: string[] | number[] } => {
-    const items = input.split(',').map(s => s.trim()).filter(Boolean);
+  const parseInput = useCallback((raw: string): { type: 'tracking' | 'claim_id', values: string[] | number[] } => {
+    const items = raw.split(',').map(s => s.trim()).filter(Boolean);
     return { type: 'tracking', values: items };
   }, []);
 
   const checkClaimExists = async (trackingNumber: string): Promise<{ exists: boolean; claimId?: number; error?: string }> => {
     try {
       const decision = await getDecision(trackingNumber);
-      console.log(`[BatchProcessor] ✓ ${trackingNumber} exists in DB (Claim ID: ${decision.claim_id})`);
+      if (isDev) {
+        console.log(`[BatchProcessor] ✓ ${trackingNumber} exists in DB (Claim ID: ${decision.claim_id})`);
+      }
       return { exists: true, claimId: decision.claim_id };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.log(`[BatchProcessor] ✗ ${trackingNumber} check result: ${errorMessage}`);
+      if (isDev) {
+        console.log(`[BatchProcessor] ✗ ${trackingNumber} check result: ${errorMessage}`);
+      }
       
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Cannot connect')) {
-        console.warn(`[BatchProcessor] Connection error for ${trackingNumber} - will try Drive processing`);
+        if (isDev) {
+          console.warn(`[BatchProcessor] Connection error for ${trackingNumber} - will try Drive processing`);
+        }
         return { exists: false, error: 'Connection error - will try Drive processing' };
       }
       
       if (errorMessage.includes('No decision found') || errorMessage.includes('404')) {
-        console.log(`[BatchProcessor] ${trackingNumber} exists but no decision - will use Drive to create decision`);
+        if (isDev) {
+          console.log(`[BatchProcessor] ${trackingNumber} exists but no decision - will use Drive to create decision`);
+        }
         return { exists: false, error: 'No decision found - will use Drive processing' };
       }
       
@@ -93,6 +114,15 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
   const processBatch = async () => {
     if (!input.trim()) {
       return;
+    }
+
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
     }
 
     setProcessing(true);
@@ -106,9 +136,13 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
       const trackingNumber = value as string;
       const itemId = `tracking-${trackingNumber}`;
       
-      console.log(`[BatchProcessor] Checking tracking number: ${trackingNumber}`);
+      if (isDev) {
+        console.log(`[BatchProcessor] Checking tracking number: ${trackingNumber}`);
+      }
       const checkResult = await checkClaimExists(trackingNumber);
-      console.log(`[BatchProcessor] Result for ${trackingNumber}:`, checkResult);
+      if (isDev) {
+        console.log(`[BatchProcessor] Result for ${trackingNumber}:`, checkResult);
+      }
       
       if (checkResult.exists && checkResult.claimId) {
         dbClaimIds.push(checkResult.claimId);
@@ -119,10 +153,14 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
           status: 'pending',
           source: 'db',
         });
-        console.log(`[BatchProcessor] ${trackingNumber} -> DB mode (Claim ID: ${checkResult.claimId})`);
+        if (isDev) {
+          console.log(`[BatchProcessor] ${trackingNumber} -> DB mode (Claim ID: ${checkResult.claimId})`);
+        }
       } else {
         if (checkResult.error) {
-          console.warn(`[BatchProcessor] ${trackingNumber} check failed: ${checkResult.error}`);
+          if (isDev) {
+            console.warn(`[BatchProcessor] ${trackingNumber} check failed: ${checkResult.error}`);
+          }
         }
         driveTrackingNumbers.push(trackingNumber);
         batchItems.push({
@@ -132,13 +170,17 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
           status: 'pending',
           source: 'drive',
         });
-        console.log(`[BatchProcessor] ${trackingNumber} -> Drive mode`);
+        if (isDev) {
+          console.log(`[BatchProcessor] ${trackingNumber} -> Drive mode`);
+        }
       }
     }
     
-    console.log(`[BatchProcessor] Summary: ${dbClaimIds.length} DB claims, ${driveTrackingNumbers.length} Drive claims`);
-    console.log(`[BatchProcessor] DB claim IDs:`, dbClaimIds);
-    console.log(`[BatchProcessor] Drive tracking numbers:`, driveTrackingNumbers);
+    if (isDev) {
+      console.log(`[BatchProcessor] Summary: ${dbClaimIds.length} DB claims, ${driveTrackingNumbers.length} Drive claims`);
+      console.log(`[BatchProcessor] DB claim IDs:`, dbClaimIds);
+      console.log(`[BatchProcessor] Drive tracking numbers:`, driveTrackingNumbers);
+    }
 
     setItems(batchItems);
 
@@ -163,28 +205,10 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
             updateItemStatus(itemId, 'processing');
             
             try {
-              // Add timeout to prevent hanging requests (5 minutes for drive processing)
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-              
-              const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/claims/process-from-drive`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  tracking_number: trackingNumber,
-                  drive_folder_id: DEFAULT_DRIVE_FOLDER_ID,
-                }),
-                signal: controller.signal,
+              const decision = await processFromDrive({
+                tracking_number: trackingNumber,
+                drive_folder_id: DEFAULT_DRIVE_FOLDER_ID,
               });
-              
-              clearTimeout(timeoutId);
-
-              if (!response.ok) {
-                const error = await response.json().catch(() => ({ detail: 'Failed to process from Google Drive' }));
-                throw new Error(error.detail || `HTTP error! status: ${response.status}`);
-              }
-
-              const decision = await response.json();
               updateItemStatus(itemId, 'completed', decision);
               return decision;
             } catch (error) {
@@ -225,46 +249,56 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
             setBatchStatus(status);
 
             if (status.status === 'completed' || status.status === 'failed') {
-              clearInterval(pollInterval);
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+              if (pollTimeoutRef.current) {
+                clearTimeout(pollTimeoutRef.current);
+                pollTimeoutRef.current = null;
+              }
               
               if (status.status === 'completed') {
-                console.log(`[BatchProcessor] Batch completed, fetching decisions for ${dbItems.length} items...`);
+                if (isDev) {
+                  console.log(`[BatchProcessor] Batch completed, fetching decisions for ${dbItems.length} items...`);
+                }
                 for (const item of dbItems) {
                   try {
-                    console.log(`[BatchProcessor] Fetching decision for ${item.value}...`);
+                    if (isDev) {
+                      console.log(`[BatchProcessor] Fetching decision for ${item.value}...`);
+                    }
                     const decision = await getDecision(item.value);
-                    console.log(`[BatchProcessor] ✓ Got decision for ${item.value}:`, decision);
+                    if (isDev) {
+                      console.log(`[BatchProcessor] ✓ Got decision for ${item.value}:`, decision);
+                    }
                     updateItemStatus(item.id, 'completed', decision);
                   } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch decision';
-                    console.error(`[BatchProcessor] ✗ Error fetching decision for ${item.value}:`, error);
+                    if (isDev) {
+                      console.error(`[BatchProcessor] ✗ Error fetching decision for ${item.value}:`, error);
+                    }
                     
                     if (errorMessage.includes('Failed to fetch') || errorMessage.includes('Cannot connect')) {
-                      console.warn(`[BatchProcessor] Connection error for ${item.value}, trying Drive processing as fallback...`);
+                      if (isDev) {
+                        console.warn(`[BatchProcessor] Connection error for ${item.value}, trying Drive processing as fallback...`);
+                      }
                       updateItemStatus(item.id, 'processing');
                       try {
-                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/claims/process-from-drive`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            tracking_number: item.value,
-                            drive_folder_id: DEFAULT_DRIVE_FOLDER_ID,
-                          }),
+                        const decision = await processFromDrive({
+                          tracking_number: item.value,
+                          drive_folder_id: DEFAULT_DRIVE_FOLDER_ID,
                         });
-                        if (response.ok) {
-                          const decision = await response.json();
+                        if (isDev) {
                           console.log(`[BatchProcessor] ✓ Fallback Drive processing succeeded for ${item.value}`);
-                          setItems(prev => prev.map(i => 
-                            i.id === item.id 
-                              ? { ...i, status: 'completed' as const, decision, source: 'drive' as const }
-                              : i
-                          ));
-                        } else {
-                          const error = await response.json().catch(() => ({ detail: 'Failed to process from Google Drive' }));
-                          updateItemStatus(item.id, 'error', undefined, error.detail || 'Connection error - backend may not be running');
                         }
+                        setItems(prev => prev.map(i => 
+                          i.id === item.id 
+                            ? { ...i, status: 'completed' as const, decision, source: 'drive' as const }
+                            : i
+                        ));
                       } catch (driveError) {
-                        updateItemStatus(item.id, 'error', undefined, 'Connection error - backend may not be running');
+                        const errorMessage = driveError instanceof Error ? driveError.message : 'Connection error - backend may not be running';
+                        updateItemStatus(item.id, 'error', undefined, errorMessage);
                       }
                     } else if (errorMessage.includes('No decision found') || errorMessage.includes('404')) {
                       updateItemStatus(item.id, 'error', undefined, 'No decision found - batch may not have created decision yet');
@@ -296,7 +330,9 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
                       const decision = await getDecision(item.value);
                       // Successfully got decision - mark as completed immediately
                       updateItemStatus(item.id, 'completed', decision);
-                      console.log(`[BatchProcessor] ✓ Fetched decision for ${item.value} before batch completion`);
+                      if (isDev) {
+                        console.log(`[BatchProcessor] ✓ Fetched decision for ${item.value} before batch completion`);
+                      }
                     } catch (error) {
                       // Decision doesn't exist yet or error - that's OK, will retry next poll
                       // Don't log to avoid spam
@@ -305,11 +341,20 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
               );
             }
           } catch (error) {
-            console.error('Error polling batch status:', error);
+            if (isDev) {
+              console.error('Error polling batch status:', error);
+            }
           }
         }, 1000); // Poll every 1 second for faster updates (was 2 seconds)
 
-        setTimeout(() => clearInterval(pollInterval), 300000);
+        pollIntervalRef.current = pollInterval;
+        pollTimeoutRef.current = setTimeout(() => {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+          pollTimeoutRef.current = null;
+        }, 300000);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to submit batch';
         console.error(`[BatchProcessor] Error submitting batch:`, error);
@@ -321,13 +366,26 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
 
     // Process DB items first (faster) and Drive items in parallel
     // DB items can be displayed immediately as they complete
-    await Promise.all([
-      processDbItems(),  // DB claims process faster and can be displayed immediately
-      processDriveItems(), // Drive items take longer (document processing, OCR, etc.)
-    ]);
-
-    setProcessing(false);
+    try {
+      await Promise.all([
+        processDbItems(),  // DB claims process faster and can be displayed immediately
+        processDriveItems(), // Drive items take longer (document processing, OCR, etc.)
+      ]);
+    } finally {
+      setProcessing(false);
+    }
   };
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const getStatusColor = (status: BatchItem['status']) => {
     switch (status) {
@@ -360,7 +418,7 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
               </h3>
               <div className="mt-2 text-sm text-red-700">
                 <p>
-                  Cannot connect to backend at <code className="bg-red-100 px-1 rounded">{process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}</code>
+                  Cannot connect to backend at <code className="bg-red-100 px-1 rounded">{getBaseUrl()}</code>
                 </p>
                 <p className="mt-1">
                   Please start the backend server before processing batches. All operations require the backend to be running.
@@ -492,4 +550,3 @@ export default function BatchProcessor({ initialInput = '' }: BatchProcessorProp
     </div>
   );
 }
-

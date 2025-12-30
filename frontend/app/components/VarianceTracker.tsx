@@ -10,10 +10,12 @@ interface VarianceTrackerProps {
 export default function VarianceTracker({ decisions }: VarianceTrackerProps) {
   const [varianceData, setVarianceData] = useState<Map<string, VarianceData | null>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchVarianceData = async () => {
       setLoading(true);
+      setError(null);
       const varianceMap = new Map<string, VarianceData | null>();
 
       for (const decision of decisions) {
@@ -22,6 +24,7 @@ export default function VarianceTracker({ decisions }: VarianceTrackerProps) {
           varianceMap.set(decision.tracking_number, variance);
         } catch (error) {
           console.error(`Error fetching variance for ${decision.tracking_number}:`, error);
+          setError('Some variance records could not be fetched. Showing partial data.');
           varianceMap.set(decision.tracking_number, null);
         }
       }
@@ -105,6 +108,11 @@ export default function VarianceTracker({ decisions }: VarianceTrackerProps) {
 
       {loading && (
         <div className="text-center py-4 text-gray-500">Loading variance data...</div>
+      )}
+      {!loading && error && (
+        <div className="mb-4 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded p-3">
+          {error}
+        </div>
       )}
 
       {!loading && aggregateMetrics && (
@@ -215,6 +223,7 @@ export default function VarianceTracker({ decisions }: VarianceTrackerProps) {
     </div>
   );
 }
+
 
 
 

@@ -6,11 +6,27 @@ LLM output is advisory only - final coverage decisions are made here.
 """
 
 import logging
+import re
 from typing import Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _match_word_boundary(phrase: str, text: str) -> bool:
+    """
+    Check if phrase matches as a whole word in text.
+    Prevents 'pet' from matching 'carpet'.
+    """
+    # Use word boundary regex for short phrases that might be substrings
+    if len(phrase) <= 4:
+        # For short phrases like 'pet', 'cat', 'dog', use word boundary matching
+        pattern = r'\b' + re.escape(phrase) + r'\b'
+        return bool(re.search(pattern, text))
+    else:
+        # For longer phrases, substring matching is usually fine
+        return phrase in text
 
 
 # Deterministic phrase lists for category detection
@@ -77,7 +93,7 @@ OTHER_INSURANCE_PHRASES = [
     "pest treatment",
     "pet deposit",
     "pet damage",
-    "pet cleaning",
+    # Removed "pet cleaning" - it matches "carpet cleaning" incorrectly
     "fire",
     "smoke",
     "burn",
@@ -101,6 +117,23 @@ CONTRACTUAL_FEE_PHRASES = [
     "renters insurance"
 ]
 
+# Prior balances are ledger entries, not damage charges
+PRIOR_BALANCE_PHRASES = [
+    "balance as of",
+    "beginning balance",
+    "initial balance",
+    "prior balance",
+    "opening balance",
+    "balance forward",
+    "carryover balance",
+    "previous balance",
+    "outstanding balance",
+    "amount due",
+    "total amount due",
+    "past due",
+    "amount owed"
+]
+
 
 class LineItemCategory:
     """Deterministic category tags for a line item."""
@@ -115,7 +148,8 @@ class LineItemCategory:
         is_improper_notice: bool = False,
         is_other_insurance: bool = False,
         is_contractual_fee: bool = False,
-        is_after_lease_end: bool = False
+        is_after_lease_end: bool = False,
+        is_prior_balance: bool = False
     ):
         self.is_rent = is_rent
         self.is_month_to_month = is_month_to_month
@@ -126,6 +160,7 @@ class LineItemCategory:
         self.is_other_insurance = is_other_insurance
         self.is_contractual_fee = is_contractual_fee
         self.is_after_lease_end = is_after_lease_end
+        self.is_prior_balance = is_prior_balance
 
 
 def categorize_line_item(
@@ -154,8 +189,12 @@ def categorize_line_item(
     is_repair = any(phrase in description_lower for phrase in REPAIR_PHRASES)
     is_damage = any(phrase in description_lower for phrase in DAMAGE_PHRASES)
     is_improper_notice = any(phrase in description_lower for phrase in IMPROPER_NOTICE_PHRASES)
-    is_other_insurance = any(phrase in description_lower for phrase in OTHER_INSURANCE_PHRASES)
+    # Use word boundary matching for OTHER_INSURANCE_PHRASES to avoid false positives
+    # e.g., "pet" should not match "carpet"
+    is_other_insurance = any(_match_word_boundary(phrase, description_lower) for phrase in OTHER_INSURANCE_PHRASES)
     is_contractual_fee = any(phrase in description_lower for phrase in CONTRACTUAL_FEE_PHRASES)
+    # Prior balances are ledger entries, not actual damage charges
+    is_prior_balance = any(phrase in description_lower for phrase in PRIOR_BALANCE_PHRASES)
     
     is_after_lease_end = False
     if lease_end_date and charge_date:
@@ -175,7 +214,8 @@ def categorize_line_item(
         is_improper_notice=is_improper_notice,
         is_other_insurance=is_other_insurance,
         is_contractual_fee=is_contractual_fee,
-        is_after_lease_end=is_after_lease_end
+        is_after_lease_end=is_after_lease_end,
+        is_prior_balance=is_prior_balance
     )
 
 
@@ -203,8 +243,7 @@ def should_be_included_deterministic(
         if amount > Decimal("100000") or amount < Decimal("0"):
             return False
     
-    # Only auto-deny the most clear-cut ineligible categories
-    # Removed: is_contractual_fee, is_after_lease_end (be more lenient)
+    # Auto-deny ineligible categories
     if category.is_rent:
         return False
     
@@ -217,8 +256,16 @@ def should_be_included_deterministic(
     if category.is_other_insurance:
         return False
     
+    # Prior balances are ledger entries, not damage charges
+    if category.is_prior_balance:
+        return False
+    
+    # Contractual fees (late fees, utility fees, etc.) are not damage charges
+    if category.is_contractual_fee:
+        return False
+    
     # Only deny normal wear/tear if explicitly flagged (be more lenient)
-    if is_normal_wear_tear and category.is_normal_wear_tear:
+    if is_normal_wear_tear:
         return False
     
     # More lenient: Approve if it's any type of cleaning, repair, or damage
@@ -232,7 +279,12 @@ def should_be_included_deterministic(
     
     # More lenient default: If not explicitly denied and not clearly ineligible, approve
     # This is a more approval-leaning policy
-    if not category.is_rent and not category.is_month_to_month and not category.is_improper_notice and not category.is_other_insurance:
+    if (not category.is_rent and 
+        not category.is_month_to_month and 
+        not category.is_improper_notice and 
+        not category.is_other_insurance and
+        not category.is_prior_balance and
+        not category.is_contractual_fee):
         return True
     
     # Only deny if explicitly in one of the denial categories
@@ -284,28 +336,6 @@ def apply_deterministic_rules(
     if not line_items:
         return []
     
-    # Check for cleaning-only invoice AFTER excluding rent/contractual fees
-    # Get items that would be eligible (not rent, not contractual fees)
-    eligible_candidates = []
-    for item in line_items:
-        description = str(item.get('description', '')).lower()
-        is_rent = any(phrase in description for phrase in RENT_PHRASES)
-        is_contractual = any(phrase in description for phrase in CONTRACTUAL_FEE_PHRASES)
-        is_payment = 'payment' in description or item.get('amount', 0) < 0
-        if not is_rent and not is_contractual and not is_payment:
-            eligible_candidates.append(item)
-    
-    # Check if this is a cleaning-only invoice (all eligible items are cleaning)
-    cleaning_only_invoice = False
-    if eligible_candidates:
-        all_cleaning = all(
-            any(phrase in str(item.get('description', '')).lower() for phrase in CLEANING_PHRASES)
-            for item in eligible_candidates
-        )
-        if all_cleaning:
-            cleaning_only_invoice = True
-            logger.info(f"Cleaning-only invoice detected ({len(eligible_candidates)} cleaning items) - denying per policy")
-    
     flagged_items = []
     for i, item in enumerate(line_items):
         description = item.get('description', '')
@@ -318,13 +348,14 @@ def apply_deterministic_rules(
         )
         
         is_normal_wear_tear = False
+        # Approval-leaning default: assume addendum coverage unless we have explicit evidence otherwise
         is_covered_by_addendum = True  # Default to True
-        if llm_suggestions and i < len(llm_suggestions):
+        has_llm_suggestion = llm_suggestions and i < len(llm_suggestions)
+        if has_llm_suggestion:
             is_normal_wear_tear = llm_suggestions[i].get('is_normal_wear_tear', False)
             is_covered_by_addendum = llm_suggestions[i].get('is_covered_by_addendum', True)
-        
-        # Also check if item already has is_covered_by_addendum flag (from LLM analysis)
-        if 'is_covered_by_addendum' in item:
+        elif 'is_covered_by_addendum' in item:
+            # Only fall back to item-level flags when no fresh LLM suggestions are provided
             is_covered_by_addendum = item.get('is_covered_by_addendum', True)
         
         should_include = should_be_included_deterministic(
@@ -333,13 +364,7 @@ def apply_deterministic_rules(
             amount=amount,
             is_covered_by_addendum=is_covered_by_addendum
         )
-        
-        # Override: if cleaning-only invoice, deny all cleaning items
-        if cleaning_only_invoice and category.is_cleaning:
-            should_include = False
-            deterministic_rule = 'cleaning_only_invoice_denied'
-        else:
-            deterministic_rule = item.get('deterministic_rule', '')
+        deterministic_rule = item.get('deterministic_rule', '')
         
         flagged_item = {
             **item,
@@ -354,6 +379,7 @@ def apply_deterministic_rules(
             'is_other_insurance': category.is_other_insurance,
             'is_contractual_fee': category.is_contractual_fee,
             'is_after_lease_end': category.is_after_lease_end,
+            'is_prior_balance': category.is_prior_balance,
             'is_normal_wear_tear': is_normal_wear_tear,
             'is_covered_by_addendum': is_covered_by_addendum,  # Preserve LLM's determination
             'deterministic_rule_applied': True
@@ -362,4 +388,3 @@ def apply_deterministic_rules(
         flagged_items.append(flagged_item)
     
     return flagged_items
-

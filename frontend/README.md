@@ -10,10 +10,11 @@ cd frontend
 npm install
 ```
 
-2. Configure API URL (optional, defaults to http://localhost:8000/api/v1):
+2. Configure API URL (optional, defaults to http://localhost:8000/api/v1) and Drive folder ID (optional, defaults to the shared demo ID):
 ```bash
 # Create .env.local file
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1" > .env.local
+echo "NEXT_PUBLIC_DRIVE_FOLDER_ID=<your_drive_folder_id>" >> .env.local
 ```
 
 3. Run development server:
@@ -32,6 +33,11 @@ The app will be available at http://localhost:3000
 - Add notes for changed items
 - Save changes to database
 - User overrides stored separately for rule refinement
+
+## UX Notes
+
+- Long line-item lists are rendered naively (no virtualization); very large claims may benefit from windowing/pagination.
+- Error/loading states are minimal in variance/decision views; backend connectivity issues are surfaced, but deeper API errors are only lightly summarized.
 
 ## API Endpoints Used
 

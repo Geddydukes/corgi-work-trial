@@ -53,6 +53,7 @@ env.backup.*
 google-drive-credentials.json
 *credentials*.json
 credentials/
+gen-lang-client-*.json
 
 # IDE
 .idea/

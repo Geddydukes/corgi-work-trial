@@ -1,0 +1,13 @@
+{
+  "total_claims": 11,
+  "status_accuracy": 0.7272727272727273,
+  "status_matches": 8,
+  "total_proposed_amount": 6300.0,
+  "total_actual_amount": 10034.0,
+  "total_variance": 3734.0,
+  "avg_proposed_amount": 572.7272727272727,
+  "avg_actual_amount": 1254.25,
+  "mean_absolute_error": 565.4,
+  "max_absolute_error": 2500.0,
+  "min_absolute_error": 0.0
+}

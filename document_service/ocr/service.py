@@ -6,10 +6,13 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple, List
 
-import pdfplumber
+try:
+    import pdfplumber  # Optional; fallback if missing
+except ImportError:  # pragma: no cover - optional dependency
+    pdfplumber = None
+
 import PyPDF2
 from PIL import Image
-from pypdf import PdfReader
 
 from shared import config
 from shared.models import (
@@ -35,6 +38,13 @@ class OCRService:
         """Check if Tesseract is available."""
         try:
             import pytesseract
+            # Allow override of the binary path for environments where tesseract is not on PATH
+            if config.Config.TESSERACT_CMD:
+                pytesseract.pytesseract.tesseract_cmd = config.Config.TESSERACT_CMD
+            # Allow explicit tessdata prefix if provided
+            if config.Config.TESSDATA_PREFIX:
+                import os
+                os.environ["TESSDATA_PREFIX"] = config.Config.TESSDATA_PREFIX
             pytesseract.get_tesseract_version()
             return True
         except Exception:
@@ -105,20 +115,22 @@ class OCRService:
             
             try:
                 with open(file_path, "rb") as f:
-                    reader = PdfReader(f)
+                    reader = PyPDF2.PdfReader(f)
                     text_pypdf2 = ""
                     for page in reader.pages:
-                        text_pypdf2 += page.extract_text() + "\n"
+                        extracted = page.extract_text() or ""
+                        text_pypdf2 += extracted + "\n"
             except Exception as e:
                 logger.debug(f"PyPDF2 extraction failed: {e}")
             
             try:
-                with pdfplumber.open(file_path) as pdf:
-                    text_pdfplumber = ""
-                    for page in pdf.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_pdfplumber += page_text + "\n"
+                if pdfplumber:
+                    with pdfplumber.open(file_path) as pdf:
+                        text_pdfplumber = ""
+                        for page in pdf.pages:
+                            page_text = page.extract_text()
+                            if page_text:
+                                text_pdfplumber += page_text + "\n"
             except Exception as e:
                 logger.debug(f"pdfplumber extraction failed: {e}")
             
@@ -448,4 +460,3 @@ Return only the extracted text, no explanations or additional commentary."""
                 best_attempt = attempt
         
         return attempts, best_attempt
-

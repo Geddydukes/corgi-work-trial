@@ -7,6 +7,7 @@ import DecisionSummary from './DecisionSummary';
 import BatchProcessor from './BatchProcessor';
 
 export default function DecisionViewer() {
+  const isDev = process.env.NODE_ENV === 'development';
   const [trackingNumber, setTrackingNumber] = useState('');
   const [decision, setDecision] = useState<DecisionResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -18,8 +19,7 @@ export default function DecisionViewer() {
   const [capEnabled, setCapEnabled] = useState(true);
   const [overrideCapAmount, setOverrideCapAmount] = useState<number | undefined>(undefined);
   const [overrideStatus, setOverrideStatus] = useState<string | undefined>(undefined);
-  // Default Google Drive folder ID
-  const DEFAULT_DRIVE_FOLDER_ID = '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
+  const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
 
   const hasCommas = useMemo(() => {
     return trackingNumber.includes(',');
@@ -47,11 +47,15 @@ export default function DecisionViewer() {
     let processedFromDrive = false;
 
     try {
-      console.log(`[DecisionViewer] Fetching decision for: ${trackingNumber.trim()}`);
+      if (isDev) {
+        console.log(`[DecisionViewer] Fetching decision for: ${trackingNumber.trim()}`);
+      }
       const startTime = Date.now();
       const result = await getDecision(trackingNumber.trim());
       const duration = Date.now() - startTime;
-      console.log(`[DecisionViewer] Decision fetched in ${duration}ms:`, result);
+      if (isDev) {
+        console.log(`[DecisionViewer] Decision fetched in ${duration}ms:`, result);
+      }
       setLoadingMessage('');
       setDecision(result);
       
@@ -229,8 +233,8 @@ export default function DecisionViewer() {
     const changedItems = Array.from(lineItemStates.entries())
       .filter(([_, state]) => state.changed);
     
-      const capChanged = !capEnabled || overrideCapAmount !== undefined || 
-      (decision.cap_amount && capEnabled !== true);
+    const capChanged = overrideCapAmount !== undefined || 
+      (decision.cap_amount !== undefined && !capEnabled);
     const statusChanged = overrideStatus !== undefined && overrideStatus !== decision.proposed_status;
 
     if (changedItems.length === 0 && !capChanged && !statusChanged) {
@@ -463,4 +467,3 @@ export default function DecisionViewer() {
     </div>
   );
 }
-

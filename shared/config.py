@@ -48,6 +48,8 @@ class Config:
     DEDUP_CACHE_TTL_DAYS: int = 90
     
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    ELIGIBLE_TO_INVOICE_SANITY_MULTIPLIER: float = float(os.getenv("ELIGIBLE_TO_INVOICE_SANITY_MULTIPLIER", "1.5"))
+    INVOICE_TO_CLAIM_SANITY_MULTIPLIER: float = float(os.getenv("INVOICE_TO_CLAIM_SANITY_MULTIPLIER", "1.5"))
     
     DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
     
@@ -84,7 +86,10 @@ class Config:
     LANGUAGE_DETECTION_ENABLED: bool = os.getenv("LANGUAGE_DETECTION_ENABLED", "true").lower() == "true"
     RTL_LANGUAGE_SUPPORT: bool = os.getenv("RTL_LANGUAGE_SUPPORT", "true").lower() == "true"
     
+    # Tesseract configuration (Tier2 OCR)
+    TESSERACT_CMD: Optional[str] = os.getenv("TESSERACT_CMD")
+    TESSDATA_PREFIX: Optional[str] = os.getenv("TESSDATA_PREFIX")
+    
     @classmethod
     def ensure_temp_dir(cls) -> None:
         cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
