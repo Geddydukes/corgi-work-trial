@@ -9,11 +9,14 @@ import psycopg2
 import json
 from datetime import datetime
 
+import os
 API_URL = "http://localhost:8000/api/v1"
-DRIVE_FOLDER_ID = "1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4"
+DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "YOUR_DRIVE_FOLDER_ID_HERE")
 
 def get_db_connection():
-    return psycopg2.connect("postgresql://postgres:postgres@localhost:5432/corgi_dev")
+    import os
+    db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/app_dev")
+    return psycopg2.connect(db_url)
 
 def check_server():
     try:

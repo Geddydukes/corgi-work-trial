@@ -20,10 +20,10 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV TEMP_DIR=/tmp/corgi_documents
+ENV TEMP_DIR=/tmp/app_documents
 
 # Create temp directory
-RUN mkdir -p /tmp/corgi_documents
+RUN mkdir -p /tmp/app_documents
 
 CMD ["python", "-m", "document_processor"]
 

@@ -26,7 +26,7 @@ from shared.models import DocumentType
 async def run_decisions(start_tracking: int = 900, end_tracking: int = 904):
     """Run decision engine on specified claims."""
     
-    db_url = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
+    db_url = "postgresql://postgres:postgres@localhost:5432/app_dev"
     engine = create_engine(db_url)
     decision_engine = DecisionEngine()
     repository = ClaimRepository()

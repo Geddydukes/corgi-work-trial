@@ -61,7 +61,7 @@ if db_claims:
 if drive_claims:
     print(f"POST /api/v1/claims/process-from-drive (concurrent, max 5 at a time)")
     for tn in drive_claims:
-        print(f"  Body: {{'tracking_number': '{tn}', 'drive_folder_id': '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4'}}")
+        print(f"  Body: {{'tracking_number': '{tn}', 'drive_folder_id': 'YOUR_DRIVE_FOLDER_ID_HERE'}}")
     print()
 
 print("Step 4: Expected Results")
@@ -75,6 +75,8 @@ print()
 print("=" * 80)
 print("Test Complete")
 print("=" * 80)
+
+
 
 
 

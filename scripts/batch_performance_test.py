@@ -21,8 +21,8 @@ from sqlalchemy import create_engine, text
 
 # Configuration
 API_URL = "http://localhost:8000/api/v1"
-DB_URL = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
-LOCAL_FILES_PATH = Path("/Users/geddydukes/Downloads/drive-download-20251230T010322Z-1-001")
+DB_URL = "postgresql://postgres:postgres@localhost:5432/app_dev"
+LOCAL_FILES_PATH = Path(os.getenv("LOCAL_FILES_PATH", "./local_files"))
 OUTPUT_DIR = Path(__file__).parent / "performance_test_results"
 OUTPUT_DIR.mkdir(exist_ok=True)
 

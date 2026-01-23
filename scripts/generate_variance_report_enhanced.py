@@ -56,7 +56,7 @@ def generate_variance_report(start_tracking: int = 900, end_tracking: int = 904,
     from dotenv import load_dotenv
     load_dotenv()
     
-    db_url = Config.DATABASE_URL or "postgresql://postgres:postgres@localhost:5432/corgi_dev"
+    db_url = Config.DATABASE_URL or "postgresql://postgres:postgres@localhost:5432/app_dev"
     engine = create_engine(db_url)
     
     tracking_numbers = [str(i) for i in range(start_tracking, end_tracking + 1)]

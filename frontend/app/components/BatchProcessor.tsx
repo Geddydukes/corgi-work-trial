@@ -13,7 +13,7 @@ import {
 } from '@/lib/api';
 import VarianceTracker from './VarianceTracker';
 
-const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
+const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || 'YOUR_DRIVE_FOLDER_ID_HERE';
 
 interface BatchItem {
   id: string;

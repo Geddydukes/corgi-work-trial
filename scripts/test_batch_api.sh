@@ -41,12 +41,14 @@ echo "    Body: {\"claim_ids\": [<claim_ids>]}"
 echo ""
 echo "For Drive claims (if they don't exist in DB):"
 echo "  POST $API_URL/claims/process-from-drive"
-echo "    Body: {\"tracking_number\": \"<tn>\", \"drive_folder_id\": \"1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4\"}"
+echo "    Body: {\"tracking_number\": \"<tn>\", \"drive_folder_id\": \"YOUR_DRIVE_FOLDER_ID_HERE\"}"
 echo ""
 
 echo "=================================================================================="
 echo "Test script complete. Check console output above for results."
 echo "=================================================================================="
+
+
 
 
 

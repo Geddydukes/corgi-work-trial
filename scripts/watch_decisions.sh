@@ -1,7 +1,7 @@
 #!/bin/bash
 # Watch decisions being made in real-time
 
-LOG_FILE="/Users/geddydukes/Desktop/Corgi/workflow_output.log"
+LOG_FILE="${PROJECT_ROOT:-.}/workflow_output.log"
 
 echo "=========================================="
 echo "LIVE DECISION MONITOR"

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Configuration
 API_URL = "http://localhost:8000/api/v1"
-DB_URL = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
+DB_URL = "postgresql://postgres:postgres@localhost:5432/app_dev"
 START_TRACKING = 900
 END_TRACKING = 920
 PREVIOUS_RESULTS_DIR = Path(__file__).parent / "archive" / "claims_900_920_results"
@@ -375,7 +375,7 @@ def main():
         except ConnectionError as e:
             print(f"\n{e}")
             print("\nTo start the server, run:")
-            print("  cd /Users/geddydukes/Desktop/Corgi")
+            print("  cd <project-directory>")
             print("  uvicorn decision_service.main:app --host 0.0.0.0 --port 8000 --reload")
             return
         except Exception as e:

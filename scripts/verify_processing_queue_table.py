@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, text, inspect
 
 # Default database URL (matches docker-compose.yml configuration)
-default_database_url = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
+default_database_url = "postgresql://postgres:postgres@localhost:5432/app_dev"
 
 # Try to get DATABASE_URL from environment
 database_url = os.getenv("DATABASE_URL") or default_database_url

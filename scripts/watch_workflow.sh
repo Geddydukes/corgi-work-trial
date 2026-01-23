@@ -1,7 +1,7 @@
 #!/bin/bash
 # Continuous log watch for workflow progress
 
-LOG_FILE="/Users/geddydukes/Desktop/Corgi/workflow_output.log"
+LOG_FILE="${PROJECT_ROOT:-.}/workflow_output.log"
 
 echo "=========================================="
 echo "Workflow Progress Monitor"

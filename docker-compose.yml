@@ -3,11 +3,11 @@ version: '3.8'
 services:
   postgres:
     image: postgres:14-alpine
-    container_name: corgi-postgres
+    container_name: app-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: corgi_dev
+      POSTGRES_DB: app_dev
     ports:
       - "5432:5432"
     volumes:
@@ -19,11 +19,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - corgi-network
+      - app-network
 
   redis:
     image: redis:7-alpine
-    container_name: corgi-redis
+    container_name: app-redis
     ports:
       - "6379:6379"
     volumes:
@@ -35,11 +35,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - corgi-network
+      - app-network
 
   minio:
     image: minio/minio:latest
-    container_name: corgi-minio
+    container_name: app-minio
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -55,11 +55,11 @@ services:
       timeout: 20s
       retries: 3
     networks:
-      - corgi-network
+      - app-network
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: corgi-prometheus
+    container_name: app-prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -69,11 +69,11 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
     networks:
-      - corgi-network
+      - app-network
 
   grafana:
     image: grafana/grafana:latest
-    container_name: corgi-grafana
+    container_name: app-grafana
     ports:
       - "3000:3000"
     environment:
@@ -86,20 +86,20 @@ services:
     depends_on:
       - prometheus
     networks:
-      - corgi-network
+      - app-network
 
   decision-service:
     build:
       context: .
       dockerfile: Dockerfile.decision-service
-    container_name: corgi-decision-service
+    container_name: app-decision-service
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/corgi_dev
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_dev
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
       S3_ACCESS_KEY_ID: minioadmin
       S3_SECRET_ACCESS_KEY: minioadmin
-      S3_BUCKET_NAME: corgi-documents
+      S3_BUCKET_NAME: app-documents
       LOG_LEVEL: DEBUG
       JWT_SECRET_KEY: dev-secret-key-change-in-production
     ports:
@@ -116,20 +116,20 @@ services:
       - ./shared:/app/shared
     command: uvicorn decision_service.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
-      - corgi-network
+      - app-network
 
   document-service:
     build:
       context: .
       dockerfile: Dockerfile.document-service
-    container_name: corgi-document-service
+    container_name: app-document-service
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/corgi_dev
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_dev
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
       S3_ACCESS_KEY_ID: minioadmin
       S3_SECRET_ACCESS_KEY: minioadmin
-      S3_BUCKET_NAME: corgi-documents
+      S3_BUCKET_NAME: app-documents
       LOG_LEVEL: DEBUG
       OCR_TIER1_ENABLED: "true"
       OCR_TIER2_ENABLED: "true"
@@ -151,20 +151,20 @@ services:
       - ./shared:/app/shared
     command: uvicorn document_service.main:app --host 0.0.0.0 --port 8001 --reload
     networks:
-      - corgi-network
+      - app-network
 
   celery-worker:
     build:
       context: .
       dockerfile: Dockerfile.celery-worker
-    container_name: corgi-celery-worker
+    container_name: app-celery-worker
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/corgi_dev
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_dev
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
       S3_ACCESS_KEY_ID: minioadmin
       S3_SECRET_ACCESS_KEY: minioadmin
-      S3_BUCKET_NAME: corgi-documents
+      S3_BUCKET_NAME: app-documents
       LOG_LEVEL: INFO
       OCR_TIER1_ENABLED: "true"
       OCR_TIER2_ENABLED: "true"
@@ -184,15 +184,15 @@ services:
       - ./shared:/app/shared
     command: celery -A tasks.celery_app worker --loglevel=info --concurrency=4
     networks:
-      - corgi-network
+      - app-network
 
   celery-beat:
     build:
       context: .
       dockerfile: Dockerfile.celery-worker
-    container_name: corgi-celery-beat
+    container_name: app-celery-beat
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/corgi_dev
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app_dev
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -204,7 +204,7 @@ services:
       - ./shared:/app/shared
     command: celery -A tasks.celery_app beat --loglevel=info
     networks:
-      - corgi-network
+      - app-network
 
 volumes:
   postgres_data:
@@ -214,5 +214,5 @@ volumes:
   grafana_data:
 
 networks:
-  corgi-network:
+  app-network:
     driver: bridge

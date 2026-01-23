@@ -21,8 +21,8 @@ from sqlalchemy import create_engine, text
 
 # Configuration
 API_URL = "http://localhost:8000/api/v1"
-DB_URL = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
-DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4")
+DB_URL = "postgresql://postgres:postgres@localhost:5432/app_dev"
+DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "YOUR_DRIVE_FOLDER_ID_HERE")
 OUTPUT_DIR = Path(__file__).parent / "performance_test_results"
 OUTPUT_DIR.mkdir(exist_ok=True)
 

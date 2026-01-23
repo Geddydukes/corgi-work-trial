@@ -5,7 +5,7 @@ Clear decisions for claims 900-904.
 
 from sqlalchemy import create_engine, text
 
-engine = create_engine('postgresql://postgres:postgres@localhost:5432/corgi_dev')
+engine = create_engine('postgresql://postgres:postgres@localhost:5432/app_dev')
 with engine.connect() as conn:
     conn.execute(text('SET search_path TO claims, public'))
     # Delete existing decisions for claims 900-904

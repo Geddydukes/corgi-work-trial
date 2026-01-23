@@ -1,7 +1,7 @@
 #!/bin/bash
 # Continuously watch progress with file names
 
-LOG_FILE="/Users/geddydukes/Desktop/Corgi/workflow_output.log"
+LOG_FILE="${PROJECT_ROOT:-.}/workflow_output.log"
 
 # Clear screen and show header
 clear

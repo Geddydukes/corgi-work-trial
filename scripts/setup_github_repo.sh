@@ -3,7 +3,7 @@
 # Script to create a private GitHub repo and push the code
 # Usage: ./setup_github_repo.sh [repo-name] [github-username]
 
-REPO_NAME="${1:-Corgi}"
+REPO_NAME="${1:-project}"
 GITHUB_USER="${2:-}"
 
 if [ -z "$GITHUB_USER" ]; then

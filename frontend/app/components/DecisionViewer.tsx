@@ -19,7 +19,7 @@ export default function DecisionViewer() {
   const [capEnabled, setCapEnabled] = useState(true);
   const [overrideCapAmount, setOverrideCapAmount] = useState<number | undefined>(undefined);
   const [overrideStatus, setOverrideStatus] = useState<string | undefined>(undefined);
-  const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || '1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4';
+  const DEFAULT_DRIVE_FOLDER_ID = process.env.NEXT_PUBLIC_DRIVE_FOLDER_ID || 'YOUR_DRIVE_FOLDER_ID_HERE';
 
   const hasCommas = useMemo(() => {
     return trackingNumber.includes(',');

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Show current progress and which file is being processed
 
-LOG_FILE="/Users/geddydukes/Desktop/Corgi/workflow_output.log"
+LOG_FILE="${PROJECT_ROOT:-.}/workflow_output.log"
 
 echo "=========================================="
 echo "WORKFLOW PROGRESS MONITOR"

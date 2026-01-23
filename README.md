@@ -115,7 +115,7 @@ brew install tesseract libmagic libheif
 ```bash
 # Clone repository
 git clone <repository-url>
-cd Corgi
+cd <project-directory>
 
 # Install Python dependencies
 pip install -r requirements.txt
@@ -139,7 +139,7 @@ cp env.example .env
 
 ```bash
 # Database
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/corgi_dev
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/app_dev
 
 # Gemini API (required for document analysis)
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -182,7 +182,7 @@ See `env.example` for complete configuration options.
 
 ```bash
 # Start decision service
-cd /Users/geddydukes/Desktop/Corgi
+cd <project-directory>
 uvicorn decision_service.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Start document service (separate terminal)
@@ -230,7 +230,7 @@ response = requests.post(
     "http://localhost:8000/api/v1/claims/process-from-drive",
     json={
         "tracking_number": "123",
-        "drive_folder_id": "1-sEEs61X3q7AG8MV6y6wlX637KLOnMs4"
+        "drive_folder_id": "YOUR_DRIVE_FOLDER_ID_HERE"
     }
 )
 decision = response.json()
@@ -357,9 +357,7 @@ See `variance/README.md` for detailed variance analysis and `variance_report_202
 - **Error Handling**: Graceful degradation, never crash on individual claim failures
 - **Batch Processing**: Redis optional, falls back to synchronous processing
 
-## Production Readiness Improvements
-
-This section outlines recommended improvements to enhance production readiness beyond the current implementation.
+## Production Readiness Improvements for Future Development
 
 ### 1. Monitoring & Observability
 

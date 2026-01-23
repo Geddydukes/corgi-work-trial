@@ -18,7 +18,7 @@ def create_processing_queue_table():
     """Create the processing_queue table if it doesn't exist."""
     
     # Default database URL (matches docker-compose.yml configuration)
-    default_database_url = "postgresql://postgres:postgres@localhost:5432/corgi_dev"
+    default_database_url = "postgresql://postgres:postgres@localhost:5432/app_dev"
     
     # Try to get DATABASE_URL from environment directly first
     database_url = os.getenv("DATABASE_URL")

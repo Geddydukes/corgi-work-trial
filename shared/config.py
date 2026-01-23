@@ -55,7 +55,7 @@ class Config:
     
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     
-    TEMP_DIR: Path = Path(os.getenv("TEMP_DIR", "/tmp/corgi_documents"))
+    TEMP_DIR: Path = Path(os.getenv("TEMP_DIR", "/tmp/app_documents"))
     
     # Concurrency & Queue Configuration
     MAX_CONCURRENT_WORKERS: int = int(os.getenv("MAX_CONCURRENT_WORKERS", "10"))

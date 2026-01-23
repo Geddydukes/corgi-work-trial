@@ -468,7 +468,7 @@ pytest tests/ --cov=. --cov-report=html
 
 ```bash
 # Decision Service
-cd /Users/geddydukes/Desktop/Corgi
+cd <project-directory>
 python3.11 -m uvicorn decision_service.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Document Service

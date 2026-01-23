@@ -11,8 +11,8 @@
 6. After creating, run these commands in your terminal:
 
 ```bash
-cd /Users/geddydukes/Desktop/Corgi
-git remote add origin https://github.com/YOUR_USERNAME/Corgi.git
+cd <project-directory>
+git remote add origin https://github.com/YOUR_USERNAME/<repository-name>.git
 git branch -M main
 git push -u origin main
 ```
@@ -22,8 +22,8 @@ Replace `YOUR_USERNAME` with your actual GitHub username.
 ## Option 2: Using GitHub CLI (if installed)
 
 ```bash
-cd /Users/geddydukes/Desktop/Corgi
-gh repo create Corgi --private --source=. --remote=origin --push
+cd <project-directory>
+gh repo create <repository-name> --private --source=. --remote=origin --push
 ```
 
 ## Option 3: Using GitHub API with Personal Access Token
@@ -38,16 +38,16 @@ export GITHUB_TOKEN=your_token_here
 
 3. Run the setup script:
 ```bash
-cd /Users/geddydukes/Desktop/Corgi
-./setup_github_repo.sh Corgi YOUR_GITHUB_USERNAME
+cd <project-directory>
+./setup_github_repo.sh <repository-name> YOUR_GITHUB_USERNAME
 ```
 
 ## After Setup
 
 Once the repository is created and pushed, you can:
 
-- View it at: `https://github.com/YOUR_USERNAME/Corgi`
-- Clone it on another computer: `git clone https://github.com/YOUR_USERNAME/Corgi.git`
+- View it at: `https://github.com/YOUR_USERNAME/<repository-name>`
+- Clone it on another computer: `git clone https://github.com/YOUR_USERNAME/<repository-name>.git`
 - Pull updates: `git pull origin main`
 - Push changes: `git push origin main`
 
